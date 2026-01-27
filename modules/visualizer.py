@@ -38,7 +38,7 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
         ax1.bar(months, df_monthly_agg['bat_dis_kwh'], bottom=df_monthly_agg['pv_kwh'], color=colors[1], label='Bat Discharge')
         ax1.bar(months, df_monthly_agg['grid_imp_kwh'], bottom=df_monthly_agg['pv_kwh']+df_monthly_agg['bat_dis_kwh'], color=colors[2], label='Grid Import')
         
-        ax1.set_title("Monthly Energy Source (kWh)")
+        ax1.set_title("Monthly Energy Source")
         ax1.set_ylabel("Energy (kWh)")
         ax1.legend(fontsize='small')
         ax1.grid(axis='y', alpha=0.3)
@@ -51,7 +51,7 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
         ax2.bar(months, df_monthly_agg['pct_bat'], bottom=df_monthly_agg['pct_pv'], color=colors[1], label='Bat Discharge')
         ax2.bar(months, df_monthly_agg['pct_grid'], bottom=df_monthly_agg['pct_pv']+df_monthly_agg['pct_bat'], color=colors[2], label='Grid Import')
         
-        ax2.set_title("Energy Contribution (%)")
+        ax2.set_title("Energy Contribution")
         ax2.set_ylabel("Percentage (%)")
         ax2.set_ylim(0, 100)
         ax2.grid(axis='y', alpha=0.3)
@@ -81,10 +81,12 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
             ax_h.set_yticks(np.arange(12))
             ax_h.set_yticklabels([calendar.month_abbr[i] for i in range(1, 13)], fontsize=8)
             
-            ax_h.set_title("Daily VPP Duration (Hours)")
+            ax_h.set_title("VPP Heatmap")
+            
             
             cbar = ax_h.figure.colorbar(im, ax=ax_h, fraction=0.046, pad=0.04)
             cbar.ax.tick_params(labelsize=8)
+            cbar.set_label("Hour")
             
             plt.tight_layout()
             st.pyplot(fig_heat)
@@ -112,7 +114,7 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
                        daily_bat['norm_dis_kw'],
                        colors=colors_bat, labels=labels_bat, alpha=0.8)
         
-        ax_b.set_title("Daily Battery Discharge Breakdown")
+        ax_b.set_title("Normal VS VPP Discharge")
         ax_b.set_ylabel("Energy (kWh)")
         
         ax_b.xaxis.set_major_locator(mdates.MonthLocator())
@@ -131,17 +133,18 @@ def plot_monthly_analysis(df_vis_month, col_load, selected_month_name, selected_
 
     st.markdown(f"### 📉 Monthly Analysis ({selected_month_name} {selected_vis_year})")
     
+    # --- BARIS 3 (Avg GHI vs Load Profile & Hourly Solar Heatmap) ---
     c1, c2 = st.columns(2)
     
     with c1:
-        df_profile = df_vis_month.groupby(df_vis_month['timestamp'].dt.hour)[['irradiance', col_load]].mean()
+        df_profile = df_vis_month.groupby(df_vis_month['timestamp'].dt.hour)[['solar_output_kw', col_load]].mean()
         
         fig_prof, ax_p1 = plt.subplots(figsize=(6, 4))
         
         color_ghi = 'orange'
         ax_p1.set_xlabel('Hour (0-23)')
-        ax_p1.set_ylabel('GHI ($W/m^2$)', color=color_ghi)
-        line1 = ax_p1.plot(df_profile.index, df_profile['irradiance'], color=color_ghi, linewidth=2, label='GHI')
+        ax_p1.set_ylabel('Solar Output (kW)', color=color_ghi)
+        line1 = ax_p1.plot(df_profile.index, df_profile['solar_output_kw'], color=color_ghi, linewidth=2, label='GHI')
         ax_p1.tick_params(axis='y', labelcolor=color_ghi)
         ax_p1.grid(True, alpha=0.3)
         
@@ -151,18 +154,18 @@ def plot_monthly_analysis(df_vis_month, col_load, selected_month_name, selected_
         line2 = ax_p2.plot(df_profile.index, df_profile[col_load], color=color_load, linewidth=2, linestyle='--', label='Load')
         ax_p2.tick_params(axis='y', labelcolor=color_load)
         
-        ax_p1.set_title("Avg Daily Profile")
+        ax_p1.set_title("Solar Output VS Load Profile")
         plt.tight_layout()
         st.pyplot(fig_prof)
 
     with c2:
         factor = 5/60
-        df_heat_solar = df_vis_month.set_index('timestamp')[['solar_output_kw']].resample('h').sum() * factor
+        df_heat_solar = df_vis_month.set_index('timestamp')[['irradiance']].resample('h').sum() * factor
         df_heat_solar = df_heat_solar.reset_index()
         df_heat_solar['d'] = df_heat_solar['timestamp'].dt.day
         df_heat_solar['h'] = df_heat_solar['timestamp'].dt.hour
         
-        solar_matrix = df_heat_solar.pivot(index='h', columns='d', values='solar_output_kw')
+        solar_matrix = df_heat_solar.pivot(index='h', columns='d', values='irradiance')
         
         curr_year = df_vis_month['timestamp'].dt.year.iloc[0]
         curr_month = df_vis_month['timestamp'].dt.month.iloc[0]
@@ -176,9 +179,9 @@ def plot_monthly_analysis(df_vis_month, col_load, selected_month_name, selected_
         
         ax_hs.set_xlabel("Day")
         ax_hs.set_ylabel("Hour")
-        ax_hs.set_title("Hourly Solar Heatmap (kWh)")
+        ax_hs.set_title("Irradiance Heatmap")
         
         cbar_sol = ax_hs.figure.colorbar(im_sol, ax=ax_hs, fraction=0.046, pad=0.04)
-        
+        cbar_sol.set_label("Irradiance ($Wh/m^2$)")
         plt.tight_layout()
         st.pyplot(fig_h_sol)
