@@ -158,10 +158,10 @@ with col_spec:
         use_rand_solar = st.toggle("Randomize / Fixed Size", key="chk_solar")
         if not use_rand_solar:
             sc1, sc2 = st.columns(2)
-            p_solar_min = sc1.number_input("Min (kWp)", 0.0, 1000.0, 4.0, step=0.5, key="sol_min")
-            p_solar_max = sc2.number_input("Max (kWp)", 0.0, 1000.0, 6.0, step=0.5, key="sol_max")
+            p_solar_min = sc1.number_input("Min (kWp)", 0.0, 1000.0, 5.0, step=0.5, key="sol_min")
+            p_solar_max = sc2.number_input("Max (kWp)", 0.0, 1000.0, 15.0, step=0.5, key="sol_max")
         else:
-            p_solar_fix = st.number_input("Capacity (kWp)", 1.0, 100.0, 5.0, 0.5, key="sol_fix")
+            p_solar_fix = st.number_input("Capacity (kWp)", 1.0, 100.0, 7.0, 0.5, key="sol_fix")
 
         p_temp = st.number_input("Temp Coeff", -0.01, 0.0, -0.004, 0.0001, format="%.4f", key="sol_temp")
         p_pr = st.number_input("PR (except temperature derated)", 0.5, 1.0, 0.8, 0.01, format="%.2f", key="sol_pr")
@@ -171,8 +171,8 @@ with col_spec:
         use_rand_bat = st.toggle("Randomize / Fixed Size", key="chk_bat")
         if not use_rand_bat:
             bc1, bc2 = st.columns(2)
-            p_bat_min = bc1.number_input("Min (kWh)", 0.0, 1000.0, 8.0, step=1.0, key="bat_min")
-            p_bat_max = bc2.number_input("Max (kWh)", 0.0, 1000.0, 12.0, step=1.0, key="bat_max")
+            p_bat_min = bc1.number_input("Min (kWh)", 0.0, 1000.0, 7.0, step=1.0, key="bat_min")
+            p_bat_max = bc2.number_input("Max (kWh)", 0.0, 1000.0, 50.0, step=1.0, key="bat_max")
         else:
             p_bat_fix = st.number_input("Capacity (kWh)", 1.0, 200.0, 10.0, 1.0, key="bat_fix")
 
