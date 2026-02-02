@@ -8,7 +8,7 @@ LOKASI_LIST = ["Aceh", "Medan", "Padang"]
 
 TITIK_LIST = ["Lokasi_1", "Lokasi_2", "Lokasi_3"]
 
-YEARS = [2023, 2024, 2025]
+YEARS = [2020, 2021, 2022, 2023, 2024, 2025, 2026]
 
 def generate_yearly_data(year):
     start = f"{year}-01-01 00:00:00"
