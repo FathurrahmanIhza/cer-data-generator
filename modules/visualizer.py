@@ -128,6 +128,37 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
         plt.tight_layout() 
         st.pyplot(fig_break)
 
+    # Baris 3 Price Profile
+
+    if 'price_profile' in df_vis_year.columns:
+        df_price_hourly = df_vis_year.set_index('timestamp')['price_profile'].resample('h').mean()
+        
+        fig_price, ax_p = plt.subplots(figsize=(12, 3)) 
+        
+        ax_p.plot(df_price_hourly.index, df_price_hourly, color='black', linewidth=0.5, alpha=0.3)
+        
+        ax_p.fill_between(df_price_hourly.index, df_price_hourly, 0, 
+                          where=(df_price_hourly >= 0), 
+                          interpolate=True, color='#2ecc71', alpha=0.6, label='Positive Price')
+        
+        ax_p.fill_between(df_price_hourly.index, df_price_hourly, 0, 
+                          where=(df_price_hourly < 0), 
+                          interpolate=True, color='#e74c3c', alpha=0.6, label='Negative Price')
+        
+        ax_p.set_ylabel("Price (AUD)")
+        ax_p.set_title("Price Profile")
+
+        ax_p.xaxis.set_major_locator(mdates.MonthLocator())
+        ax_p.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
+        ax_p.set_xlim(df_price_hourly.index[0], df_price_hourly.index[-1])
+        
+        ax_p.grid(True, alpha=0.3)
+        ax_p.legend(loc='upper right', fontsize='small')
+        
+        st.pyplot(fig_price)
+    else:
+        st.warning("Price profile data not found.")
+
 
 def plot_monthly_analysis(df_vis_month, col_load, selected_month_name, selected_vis_year):
 
