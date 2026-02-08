@@ -50,26 +50,26 @@ def run_simulation(df, params):
         net_load_pure = load - solar
         target_bat_power = 0 
         
-        # --- A. CEK VPP STATUS (CONTROL LOGIC) ---
-        # Trigger: Apakah Harga Pasar > Threshold user?
+        # --- A. CEK KONDISI PASAR (CONTROL LOGIC) ---
+        
+        # 1. Cek VPP (High Price Event)
         is_vpp_active = market_price > vpp_threshold
         vpp_status_list.append(is_vpp_active)
         
-        # --- B. ENERGY MANAGEMENT STRATEGY ---
+        is_negative_price = market_price < 0
+        # Mode 1 VPP ACTIVE DISCHARGE
         if is_vpp_active:
-            # MODE 1: VPP DISPATCH (Prioritas Tertinggi)
-            # Paksa discharge maksimum untuk respon harga tinggi
             target_bat_power = max_discharge_kw
-            
+        # Mode 2 NEGATIVE PRICE CHARGE
+        elif is_negative_price:
+            target_bat_power = -max_charge_kw 
+        # Mode 3 BASELINE 
         else:
-            # MODE 2: BASELINE STRATEGY (Cek Jam)
             is_offpeak = check_time_window(cur_time, params['t_offpeak_start'], params['t_offpeak_end'])
             is_peak = check_time_window(cur_time, params['t_peak_start'], params['t_peak_end'])
-            
             if is_offpeak:
                 # Charge saat Off-Peak
                 target_bat_power = -max_charge_kw 
-                
             elif is_peak:
                 # Peak Shaving / Self-Consumption
                 if net_load_pure > 0:
@@ -77,11 +77,9 @@ def run_simulation(df, params):
                 else:
                     target_bat_power = 0
             else: 
-                # Shoulder (Siang)
+                # Shoulder (Siang hari / Solar surplus)
                 if net_load_pure < 0:
-                    target_bat_power = net_load_pure # Simpan surplus solar
-                else:
-                    target_bat_power = net_load_pure # Support beban (opsional)
+                    target_bat_power = net_load_pure
 
         # --- C. BATTERY PHYSICS CONSTRAINTS ---
         # 1. Batasi Power (Inverter Rating)

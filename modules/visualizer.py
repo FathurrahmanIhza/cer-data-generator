@@ -40,7 +40,7 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
         
         ax1.set_title("Monthly Energy Source")
         ax1.set_ylabel("Energy (kWh)")
-        ax1.legend(fontsize='small')
+        ax1.legend(fontsize='small', loc='lower right')
         ax1.grid(axis='y', alpha=0.3)
         plt.tight_layout() 
         st.pyplot(fig1)
@@ -54,6 +54,7 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
         ax2.set_title("Energy Contribution")
         ax2.set_ylabel("Percentage (%)")
         ax2.set_ylim(0, 100)
+        ax2.legend(fontsize='small', loc='lower right')
         ax2.grid(axis='y', alpha=0.3)
         plt.tight_layout() 
         st.pyplot(fig2)
@@ -63,13 +64,14 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
 
     with c3:
         if 'vpp_status' in df_vis_year.columns:
-            df_vis_year['vpp_hours'] = df_vis_year['vpp_status'].apply(lambda x: 5/60 if x else 0)
-            daily_vpp = df_vis_year.set_index('timestamp')['vpp_hours'].resample('D').sum().reset_index()
+            df_vis_year['vpp_minutes'] = df_vis_year['vpp_status'].apply(lambda x: 5 if x else 0)
+            
+            daily_vpp = df_vis_year.set_index('timestamp')['vpp_minutes'].resample('D').sum().reset_index()
             
             daily_vpp['m'] = daily_vpp['timestamp'].dt.month
             daily_vpp['d'] = daily_vpp['timestamp'].dt.day
             
-            heatmap_data = daily_vpp.pivot(index='m', columns='d', values='vpp_hours')
+            heatmap_data = daily_vpp.pivot(index='m', columns='d', values='vpp_minutes')
             heatmap_data = heatmap_data.reindex(index=range(1, 13), columns=range(1, 32))
             data_matrix = heatmap_data.to_numpy()
             
@@ -81,18 +83,16 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
             ax_h.set_yticks(np.arange(12))
             ax_h.set_yticklabels([calendar.month_abbr[i] for i in range(1, 13)], fontsize=8)
             
-            ax_h.set_title("VPP Heatmap")
-            
+            ax_h.set_title("VPP Duration (Minutes)")
             
             cbar = ax_h.figure.colorbar(im, ax=ax_h, fraction=0.046, pad=0.04)
             cbar.ax.tick_params(labelsize=8)
-            cbar.set_label("Hour")
+            cbar.set_label("Duration (Minutes)")
             
             plt.tight_layout()
             st.pyplot(fig_heat)
         else:
             st.info("No VPP Status Data Available")
-
     with c4:
         df_bat = df_vis_year.copy()
         
@@ -122,7 +122,7 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
         plt.setp(ax_b.get_xticklabels(), rotation=0, ha="center", fontsize=9)
         
         ax_b.set_xlim(daily_bat.index[0], daily_bat.index[-1])
-        ax_b.legend(loc='upper left', fontsize='x-small')
+        ax_b.legend(loc='upper right', fontsize='x-small')
         ax_b.grid(True, alpha=0.3)
         
         plt.tight_layout() 
@@ -131,26 +131,26 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
     # Baris 3 Price Profile
 
     if 'price_profile' in df_vis_year.columns:
-        df_price_hourly = df_vis_year.set_index('timestamp')['price_profile'].resample('h').mean()
+        df_price_profile = df_vis_year.set_index('timestamp')['price_profile']
         
         fig_price, ax_p = plt.subplots(figsize=(12, 3)) 
         
-        ax_p.plot(df_price_hourly.index, df_price_hourly, color='black', linewidth=0.5, alpha=0.3)
+        ax_p.plot(df_price_profile.index, df_price_profile, color='black', linewidth=0.5, alpha=0.3)
         
-        ax_p.fill_between(df_price_hourly.index, df_price_hourly, 0, 
-                          where=(df_price_hourly >= 0), 
+        ax_p.fill_between(df_price_profile.index, df_price_profile, 0, 
+                          where=(df_price_profile >= 0), 
                           interpolate=True, color='#2ecc71', alpha=0.6, label='Positive Price')
         
-        ax_p.fill_between(df_price_hourly.index, df_price_hourly, 0, 
-                          where=(df_price_hourly < 0), 
+        ax_p.fill_between(df_price_profile.index, df_price_profile, 0, 
+                          where=(df_price_profile < 0), 
                           interpolate=True, color='#e74c3c', alpha=0.6, label='Negative Price')
         
         ax_p.set_ylabel("Price (AUD)")
-        ax_p.set_title("Price Profile")
+        ax_p.set_title("Electricity Spot Market Price")
 
         ax_p.xaxis.set_major_locator(mdates.MonthLocator())
         ax_p.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
-        ax_p.set_xlim(df_price_hourly.index[0], df_price_hourly.index[-1])
+        ax_p.set_xlim(df_price_profile.index[0], df_price_profile.index[-1])
         
         ax_p.grid(True, alpha=0.3)
         ax_p.legend(loc='upper right', fontsize='small')
@@ -158,34 +158,72 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
         st.pyplot(fig_price)
     else:
         st.warning("Price profile data not found.")
+    
+    if 'grid_net_kw' in df_vis_year.columns:
+        df_grid_daily = df_vis_year.set_index('timestamp')['grid_net_kw'].resample('d').mean()
+        
+        fig_grid, ax_g = plt.subplots(figsize=(12, 3)) 
+        
+        ax_g.plot(df_grid_daily.index, df_grid_daily, color='black', linewidth=0.5, alpha=0.3)
+        
+        ax_g.fill_between(df_grid_daily.index, df_grid_daily, 0, 
+                          where=(df_grid_daily >= 0), 
+                          interpolate=True, color='#e74c3c', alpha=0.6, label='Import (From Grid)')
+        
+        ax_g.fill_between(df_grid_daily.index, df_grid_daily, 0, 
+                          where=(df_grid_daily < 0), 
+                          interpolate=True, color='#2ecc71', alpha=0.6, label='Export (To Grid)')
+        
+        ax_g.set_ylabel("Power (kW)")
+        ax_g.set_title("Grid (Import vs Export)")
+
+        ax_g.xaxis.set_major_locator(mdates.MonthLocator())
+        ax_g.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
+        ax_g.set_xlim(df_grid_daily.index[0], df_grid_daily.index[-1])
+        
+        ax_g.grid(True, alpha=0.3)
+        ax_g.legend(loc='upper right', fontsize='small')
+        
+        st.pyplot(fig_grid)
+    else:
+        st.warning("Grid interaction data not found.")
 
 
 def plot_monthly_analysis(df_vis_month, col_load, selected_month_name, selected_vis_year):
 
     st.markdown(f"### 📉 Monthly Analysis ({selected_month_name} {selected_vis_year})")
     
-    # --- BARIS 3 (Avg GHI vs Load Profile & Hourly Solar Heatmap) ---
     c1, c2 = st.columns(2)
     
     with c1:
         df_profile = df_vis_month.groupby(df_vis_month['timestamp'].dt.hour)[['solar_output_kw', col_load]].mean()
         
+        max_val = max(df_profile['solar_output_kw'].max(), df_profile[col_load].max())
+        y_limit = max_val * 1.1 if max_val > 0 else 1.0
+
         fig_prof, ax_p1 = plt.subplots(figsize=(6, 4))
         
         color_ghi = 'orange'
         ax_p1.set_xlabel('Hour (0-23)')
         ax_p1.set_ylabel('Solar Output (kW)', color=color_ghi)
-        line1 = ax_p1.plot(df_profile.index, df_profile['solar_output_kw'], color=color_ghi, linewidth=2, label='GHI')
+        line1 = ax_p1.plot(df_profile.index, df_profile['solar_output_kw'], color=color_ghi, linewidth=2, label='Solar Output')
         ax_p1.tick_params(axis='y', labelcolor=color_ghi)
         ax_p1.grid(True, alpha=0.3)
+        ax_p1.set_ylim(0, y_limit) 
         
         ax_p2 = ax_p1.twinx()  
         color_load = '#d62728' 
         ax_p2.set_ylabel('Load (kW)', color=color_load)
-        line2 = ax_p2.plot(df_profile.index, df_profile[col_load], color=color_load, linewidth=2, linestyle='--', label='Load')
+        line2 = ax_p2.plot(df_profile.index, df_profile[col_load], color=color_load, linewidth=2, linestyle='--', label='Load Profile')
         ax_p2.tick_params(axis='y', labelcolor=color_load)
+        ax_p2.set_ylim(0, y_limit) 
         
-        ax_p1.set_title("Solar Output VS Load Profile")
+        ax_p1.set_title("Avg Daily Profile: Solar vs Load")
+    
+        lines = line1 + line2
+        labels = [l.get_label() for l in lines]
+        ax_p1.legend(lines, labels, loc='upper right', fontsize='small')
+        
         plt.tight_layout()
         st.pyplot(fig_prof)
 

@@ -36,8 +36,6 @@ def apply_config(uploaded_file):
             st.error(f"Error loading config: {e}")
 
 
-
-
 st.set_page_config(page_title="CER Simulation Data Generator", layout="wide")
 
 if 'hasil_simulasi' not in st.session_state:
@@ -71,7 +69,6 @@ with st.sidebar:
             file_name="simulation_config.json",
             mime="application/json"
         )
-
 
 
 st.title("CER Simulation Data Generator")
@@ -112,6 +109,20 @@ with col_dp:
         else:
             st.warning("There is no data on this point!")
             st.stop()
+
+        st.info("🏠 Load Profile")
+        use_rand_load = st.toggle("Randomize / Fixed Load Profile", value=False, key="chk_load")
+
+        selected_load_file = None 
+        
+        if use_rand_load:
+            list_load_files = loader.get_list_load_profiles()
+            
+            if list_load_files:
+                selected_load_file = st.selectbox("Select Profile Source", list_load_files, key="sel_load_file")
+            else:
+                st.error("No CSV files found in 'dataset/load_profile'!")
+                st.stop()
 
     with col_tariff:
         st.info("⚙️ VPP Setting")
@@ -158,10 +169,10 @@ with col_spec:
         use_rand_solar = st.toggle("Randomize / Fixed Size", key="chk_solar")
         if not use_rand_solar:
             sc1, sc2 = st.columns(2)
-            p_solar_min = sc1.number_input("Min (kWp)", 0.0, 1000.0, 5.0, step=0.5, key="sol_min")
-            p_solar_max = sc2.number_input("Max (kWp)", 0.0, 1000.0, 15.0, step=0.5, key="sol_max")
+            p_solar_min = sc1.number_input("Min (kWp)", 0.0, 1000.0, 4.0, step=0.5, key="sol_min")
+            p_solar_max = sc2.number_input("Max (kWp)", 0.0, 1000.0, 6.0, step=0.5, key="sol_max")
         else:
-            p_solar_fix = st.number_input("Capacity (kWp)", 1.0, 100.0, 7.0, 0.5, key="sol_fix")
+            p_solar_fix = st.number_input("Capacity (kWp)", 1.0, 100.0, 5.0, 0.5, key="sol_fix")
 
         p_temp = st.number_input("Temp Coeff", -0.01, 0.0, -0.004, 0.0001, format="%.4f", key="sol_temp")
         p_pr = st.number_input("PR (except temperature derated)", 0.5, 1.0, 0.8, 0.01, format="%.2f", key="sol_pr")
@@ -171,8 +182,8 @@ with col_spec:
         use_rand_bat = st.toggle("Randomize / Fixed Size", key="chk_bat")
         if not use_rand_bat:
             bc1, bc2 = st.columns(2)
-            p_bat_min = bc1.number_input("Min (kWh)", 0.0, 1000.0, 7.0, step=1.0, key="bat_min")
-            p_bat_max = bc2.number_input("Max (kWh)", 0.0, 1000.0, 50.0, step=1.0, key="bat_max")
+            p_bat_min = bc1.number_input("Min (kWh)", 0.0, 1000.0, 8.0, step=1.0, key="bat_min")
+            p_bat_max = bc2.number_input("Max (kWh)", 0.0, 1000.0, 12.0, step=1.0, key="bat_max")
         else:
             p_bat_fix = st.number_input("Capacity (kWh)", 1.0, 200.0, 10.0, 1.0, key="bat_fix")
 
@@ -200,7 +211,13 @@ if btn_run:
         final_p_bat = p_bat_fix
 
     with st.spinner(f"Combine data {selected_loc} ({selected_point}) dari {start_y}-{end_y}..."):
-        df_input = loader.load_and_merge_data(selected_loc, selected_point, start_y, end_y)
+        df_input = loader.load_and_merge_data(
+            selected_loc, 
+            selected_point, 
+            start_y, 
+            end_y, 
+            fixed_load_file=selected_load_file
+        )
         tm.sleep(0.5) 
     
     if df_input is not None:
@@ -290,7 +307,11 @@ if st.session_state['hasil_simulasi'] is not None:
                 st.markdown(f"🟦 Flat Rate: **{t_data['import_flat']} AUD/kWh**")
 
     st.markdown("### 💾 Export Data")
-    csv = df_result.to_csv(index=False).encode('utf-8')
+    
+    df_export = df_result.copy()
+    df_export = df_export.round(2)
+    
+    csv = df_export.to_csv(index=False).encode('utf-8')
     st.download_button(
         label="Download Dataset (CSV)",
         data=csv,
@@ -305,22 +326,11 @@ if st.session_state['hasil_simulasi'] is not None:
     df_result['year']  = df_result['timestamp'].dt.year
     df_result['month'] = df_result['timestamp'].dt.month
     
-    c_sel_1, c_sel_2 = st.columns(2)
-    
-    with c_sel_1:
-        available_years_vis = sorted(df_result['year'].unique())
-        selected_vis_year = st.selectbox("Select Year:", available_years_vis)
-        df_vis_year = df_result[df_result['year'] == selected_vis_year].copy()
-
-    with c_sel_2:
-        available_months = sorted(df_vis_year['month'].unique())
-        month_map = {m: calendar.month_name[m] for m in available_months}
-        selected_month_name = st.selectbox("Select Month for Profile:", list(month_map.values()))
-        selected_vis_month = [k for k, v in month_map.items() if v == selected_month_name][0]
-        df_vis_month = df_vis_year[df_vis_year['month'] == selected_vis_month].copy()
+    available_years_vis = sorted(df_result['year'].unique())
+    selected_vis_year = st.selectbox("Select Year:", available_years_vis)
+    df_vis_year = df_result[df_result['year'] == selected_vis_year].copy()
     
     factor = 5/60
-    
     col_load = 'load_profile' if 'load_profile' in df_vis_year.columns else 'beban_rumah_kw'
     col_bat  = 'battery_power_ac_kw' if 'battery_power_ac_kw' in df_vis_year.columns else 'battery_power_kw'
     
@@ -334,5 +344,19 @@ if st.session_state['hasil_simulasi'] is not None:
     m3.metric(f"Grid Import ({selected_vis_year})", f"{total_import:,.2f} kWh", delta_color="inverse")
 
     visualizer.plot_annual_overview(df_vis_year, col_bat, selected_vis_year)
+    
     st.divider()
-    visualizer.plot_monthly_analysis(df_vis_month, col_load, selected_month_name, selected_vis_year)
+
+    @st.fragment
+    def show_monthly_analysis_fragment():
+        available_months = sorted(df_vis_year['month'].unique())
+        month_map = {m: calendar.month_name[m] for m in available_months}
+        
+        selected_month_name = st.selectbox("Select Month for Profile:", list(month_map.values()))
+        
+        selected_vis_month = [k for k, v in month_map.items() if v == selected_month_name][0]
+        df_vis_month = df_vis_year[df_vis_year['month'] == selected_vis_month].copy()
+        
+        visualizer.plot_monthly_analysis(df_vis_month, col_load, selected_month_name, selected_vis_year)
+
+    show_monthly_analysis_fragment()
