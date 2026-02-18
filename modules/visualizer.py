@@ -143,47 +143,47 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
         else:
             st.info("Price Data Not Available")
 
+    
+    # # --- VISUALISASI BARIS 3 (VPP vs Normal Stackplot) ---
+    # arr_dis_kwh = df_calc['bat_dis_kwh'].to_numpy()
+    
+    # if 'vpp_status' in df_calc.columns:
+    #     arr_vpp_stat = df_calc['vpp_status'].to_numpy().astype(bool)
+    #     series_vpp = np.where(arr_vpp_stat, arr_dis_kwh, 0)
+    #     series_norm = np.where(~arr_vpp_stat, arr_dis_kwh, 0)
+    # else:
+    #     series_vpp = np.zeros_like(arr_dis_kwh)
+    #     series_norm = arr_dis_kwh
 
-    # --- VISUALISASI BARIS 3 (VPP vs Normal Stackplot) ---
-    arr_dis_kwh = df_calc['bat_dis_kwh'].to_numpy()
+    # df_stack = pd.DataFrame({
+    #     'vpp': series_vpp,
+    #     'norm': series_norm
+    # }, index=df_calc.index)
     
-    if 'vpp_status' in df_calc.columns:
-        arr_vpp_stat = df_calc['vpp_status'].to_numpy().astype(bool)
-        series_vpp = np.where(arr_vpp_stat, arr_dis_kwh, 0)
-        series_norm = np.where(~arr_vpp_stat, arr_dis_kwh, 0)
-    else:
-        series_vpp = np.zeros_like(arr_dis_kwh)
-        series_norm = arr_dis_kwh
-
-    df_stack = pd.DataFrame({
-        'vpp': series_vpp,
-        'norm': series_norm
-    }, index=df_calc.index)
+    # daily_bat = df_stack.resample('D').sum()
     
-    daily_bat = df_stack.resample('D').sum()
+    # fig_break, ax_b = plt.subplots(figsize=(12, 3.5))
+    # colors_bat = ['#d35400', '#55a868'] 
+    # labels_bat = ['VPP Discharge', 'Normal Discharge']
     
-    fig_break, ax_b = plt.subplots(figsize=(12, 3.5))
-    colors_bat = ['#d35400', '#55a868'] 
-    labels_bat = ['VPP Discharge', 'Normal Discharge']
+    # ax_b.stackplot(daily_bat.index, 
+    #                daily_bat['vpp'], 
+    #                daily_bat['norm'],
+    #                colors=colors_bat, labels=labels_bat, alpha=0.8)
     
-    ax_b.stackplot(daily_bat.index, 
-                   daily_bat['vpp'], 
-                   daily_bat['norm'],
-                   colors=colors_bat, labels=labels_bat, alpha=0.8)
+    # ax_b.set_title("VPP Discharge VS Normal Discharge")
+    # ax_b.set_ylabel("Energy (kWh)")
     
-    ax_b.set_title("VPP Discharge VS Normal Discharge")
-    ax_b.set_ylabel("Energy (kWh)")
+    # ax_b.xaxis.set_major_locator(mdates.MonthLocator())
+    # ax_b.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
+    # ax_b.set_xlim(daily_bat.index[0], daily_bat.index[-1])
     
-    ax_b.xaxis.set_major_locator(mdates.MonthLocator())
-    ax_b.xaxis.set_major_formatter(mdates.DateFormatter('%b'))
-    ax_b.set_xlim(daily_bat.index[0], daily_bat.index[-1])
+    # ax_b.legend(loc='upper right', fontsize='small')
+    # ax_b.grid(True, alpha=0.3)
     
-    ax_b.legend(loc='upper right', fontsize='small')
-    ax_b.grid(True, alpha=0.3)
+    # plt.tight_layout() 
+    # st.pyplot(fig_break)
     
-    plt.tight_layout() 
-    st.pyplot(fig_break)
-
 
     # --- VISUALISASI BARIS 4 (Price Profile) ---
     if 'price_profile' in df_calc.columns:
