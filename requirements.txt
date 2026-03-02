@@ -4,3 +4,4 @@ numpy
 matplotlib
 pyarrow
 numba
+st-gsheets-connection

@@ -1,216 +1,329 @@
 import streamlit as st
 import pandas as pd
-import matplotlib.pyplot as plt
 import numpy as np
 import time as tm
 import random
-import json
 import calendar
+import math
 
-from datetime import time
+from datetime import time, datetime
 from modules import loader, calculator
 from modules import tariff_utils as t_utils
 from modules import visualizer
-
-def time_encoder(obj):
-    """Mengubah object datetime.time menjadi string 'HH:MM' untuk JSON"""
-    if isinstance(obj, time):
-        return obj.strftime("%H:%M")
-    raise TypeError("Type not serializable")
-
-def apply_config(uploaded_file):
-    """Membaca JSON dan update session_state"""
-    if uploaded_file is not None:
-        try:
-            data = json.load(uploaded_file)
-            for k, v in data.items():
-                if (k.startswith("t_") or k.startswith("time_")) and isinstance(v, str):
-                    h, m = map(int, v.split(':'))
-                    st.session_state[k] = time(h, m)
-                else:
-                    st.session_state[k] = v
-            st.success("Config Loaded! Rerunning...")
-            tm.sleep(1)
-            st.rerun()
-        except Exception as e:
-            st.error(f"Error loading config: {e}")
-
+from modules import config as cfg 
 
 st.set_page_config(page_title="CER Simulation Data Generator", layout="wide")
+
+st.markdown(
+    """
+    <style>
+    div[data-testid="stStatusWidget"] { visibility: hidden; }
+    div[data-testid="stToastContainer"] { display: none; }
+    div[data-testid="stSpinner"]:has(code) { display: none; }
+    </style>
+    """, unsafe_allow_html=True
+)
+
+# 1. Inisialisasi State Default 
+cfg.init_default_states()
+
+if 'app_initialized' not in st.session_state:
+    st.session_state['app_initialized'] = True
+    df_hist = cfg.load_config_history()
+    if not df_hist.empty:
+        latest_config = df_hist.iloc[0]
+        cfg.apply_row_to_session(latest_config)
+        st.session_state['active_config'] = latest_config['Config_Name']
 
 if 'hasil_simulasi' not in st.session_state:
     st.session_state['hasil_simulasi'] = None
     st.session_state['used_params'] = {} 
     st.session_state['info_simulasi'] = ""
 
-with st.sidebar:
-    st.header("💾 Config Manager")
-    st.markdown("Save your current setup or load existing one.")
-    
-    uploaded_file = st.file_uploader("📂 Load Config (JSON)", type=["json"])
-    if uploaded_file:
-        if st.button("Apply Loaded Config"):
-            apply_config(uploaded_file)
-    
-    st.divider()
-    if st.button("Prepare Config for Download"):
-        config_data = {}
-        exclude_keys = ['hasil_simulasi', 'used_params', 'info_simulasi']
-        
-        for key in st.session_state:
-            if key not in exclude_keys and not key.startswith("FormSubmit"):
-                config_data[key] = st.session_state[key]
-        
-        json_str = json.dumps(config_data, default=time_encoder, indent=2)
-        
-        st.download_button(
-            label="📥 Download Config (.json)",
-            data=json_str,
-            file_name="simulation_config.json",
-            mime="application/json"
-        )
+if 'role' not in st.session_state:
+    st.session_state['role'] = 'student'
+
+if st.query_params.get("admin") == "true":
+    if st.session_state['role'] != 'admin':
+        with st.sidebar:
+            st.warning("🔒 Admin Access Required")
+            pwd = st.text_input("Enter Password", type="password")
+            
+            if pwd == st.secrets["admin_password"]: 
+                st.session_state['role'] = 'admin'
+                
+                df_hist = cfg.load_config_history()
+                if not df_hist.empty:
+                    active_cfg = st.session_state.get('active_config')
+                    if active_cfg:
+                        matched = df_hist[df_hist['Config_Name'] == active_cfg]
+                        if not matched.empty:
+                            cfg.apply_row_to_session(matched.iloc[0])
+                        else:
+                            cfg.apply_row_to_session(df_hist.iloc[0])
+                    else:
+                        cfg.apply_row_to_session(df_hist.iloc[0])
+                st.rerun()
+            elif pwd != "":
+                st.error("Access Denied!")
+        st.stop()
 
 
 st.title("CER Simulation Data Generator")
-st.markdown("Set parameter region and period to start generate data")
-st.divider()
 
-col_dp, col_spec = st.columns([1, 1], gap="medium")
+if st.session_state['role'] == 'admin':
+    st.markdown("Set parameter region and period to start generate data")
+    st.divider()
 
-with col_dp:
-    st.subheader("📁 Data Parameter")
-    
-    col_location, col_tariff = st.columns([1, 1.4])
-
-    with col_location:
-        list_lokasi = loader.get_list_lokasi()
-        if not list_lokasi:
-            st.error("Database empty! Run script 'setup_database_v6.py first!")
-            st.stop()
+    with st.sidebar:
+        st.header("☁️ Setup Config Manager")
+        active_cfg = st.session_state.get('active_config', 'Default Config')
+        st.success(f"**Active Config:** {active_cfg}")
+        st.markdown("Save and Load configuration")
+        
+        st.subheader("📂 Load History Config")
+        df_history = cfg.load_config_history()
+        
+        if not df_history.empty:
+            history_options = df_history['Timestamp'].astype(str) + " | " + df_history['Config_Name'].astype(str)
+            selected_history_str = st.selectbox("Select Config:", history_options.tolist())
             
-        st.info("🌍 Location")
-        l1 , l2 = st.columns(2)
-
-        selected_loc = l1.selectbox("1. Choose Region", list_lokasi, key="loc_region")
-        
-        list_titik = loader.get_list_titik(selected_loc)
-        selected_point = l2.selectbox("2. Choose Point", list_titik, key="loc_point")
-        
-        available_years = loader.get_available_years(selected_loc, selected_point)
-        
-        st.info("🕒 Duration")
-        if available_years:
-            min_year, max_year = min(available_years), max(available_years)
-            y1, y2 = st.columns(2)
-            start_y = y1.selectbox("Start Date", available_years, index=0, key="date_start")
-            
-            valid_end_years = [y for y in available_years if y >= start_y]
-            end_y = y2.selectbox("End Date", valid_end_years, index=len(valid_end_years)-1, key="date_end")
+            if st.button("Apply Config", use_container_width=True):
+                selected_row = df_history[history_options == selected_history_str].iloc[0]
+                cfg.apply_row_to_session(selected_row)
+                st.session_state['active_config'] = selected_row['Config_Name']
+                st.success("✅ Config Applied! Rerunning...")
+                st.rerun()
         else:
-            st.warning("There is no data on this point!")
-            st.stop()
-
-        st.info("🏠 Load Profile")
-        use_rand_load = st.toggle("Randomize / Fixed Load Profile", value=False, key="chk_load")
-
-        selected_load_file = None 
-        
-        if use_rand_load:
-            list_load_files = loader.get_list_load_profiles()
+            st.info("No History Config Available.")
             
-            if list_load_files:
-                selected_load_file = st.selectbox("Select Profile Source", list_load_files, key="sel_load_file")
+        st.divider()
+        
+        st.subheader("💾 Save Current Config")
+        new_config_name = st.text_input("Config Name (ex: Exam Config 1)")
+        
+        if st.button("Save Config", type="primary", use_container_width=True):
+            if new_config_name.strip() == "":
+                st.warning("⚠️ Empty Config Name")
             else:
-                st.error("No CSV files found in 'dataset/load_profile'!")
+                with st.spinner("Saving to Google Sheets..."):
+                    success = cfg.save_config_to_sheets(new_config_name, st.session_state)
+                    if success:
+                        st.session_state['active_config'] = new_config_name
+                        st.success("✅ Succesfully Saved Config!")
+                        tm.sleep(1)
+                        st.rerun()
+
+        st.divider()
+
+
+    col_dp, col_spec = st.columns([1, 1], gap="medium")
+
+    with col_dp:
+        st.subheader("📁 Data Parameter")
+        col_location, col_tariff = st.columns([1, 1.4])
+
+        with col_location:
+            list_lokasi = loader.get_list_lokasi()
+            if not list_lokasi:
+                st.error("Database empty!")
+                st.stop()
+                
+            st.info("🌍 Location")
+            use_rand_location = st.toggle("Randomize / Fixed Location", key="chk_loc")
+            
+            selected_loc = None
+            selected_point = None
+
+            if not use_rand_location:
+                selected_loc = random.choice(list_lokasi)
+                list_titik_random = loader.get_list_titik(selected_loc)
+                selected_point = random.choice(list_titik_random) if list_titik_random else None
+            else:
+                l1, l2 = st.columns(2)
+                selected_loc = l1.selectbox("1. Choose Region", list_lokasi, key="loc_region")
+                list_titik = loader.get_list_titik(selected_loc)
+                selected_point = l2.selectbox("2. Choose Point", list_titik, key="loc_point")
+            
+            available_years = loader.get_available_years(selected_loc, selected_point)
+            
+            st.info("🕒 Duration")
+            if available_years:
+                min_year, max_year = min(available_years), max(available_years)
+                y1, y2 = st.columns(2)
+                
+                start_kwargs = {}
+                if "date_start" not in st.session_state:
+                    start_kwargs["index"] = 0 
+                    
+                start_y = y1.selectbox("Start Date", available_years, key="date_start", **start_kwargs)
+                
+                valid_end_years = [y for y in available_years if y >= start_y]
+                end_kwargs = {}
+                
+                if "date_end" not in st.session_state:
+                    end_kwargs["index"] = len(valid_end_years) - 1
+                elif st.session_state["date_end"] not in valid_end_years:
+                    st.session_state["date_end"] = valid_end_years[-1]
+                    
+                end_y = y2.selectbox("End Date", valid_end_years, key="date_end", **end_kwargs)
+                
+            else:
+                st.warning("There is no data on this point!")
                 st.stop()
 
-    with col_tariff:
-        st.info("⚙️ VPP Setting")
-        vpp_price = st.number_input("Dispatch Price Threshold (AUD/MWh)", 0, 2000, 800, 10, key="vpp_threshold")
+            st.info("🏠 Load Profile")
+            use_rand_load = st.toggle("Randomize / Fixed Load Profile", key="chk_load")
+            selected_load_file = None 
+            
+            if use_rand_load:
+                list_load_files = loader.get_list_load_profiles()
+                if list_load_files:
+                    selected_load_file = st.selectbox("Select Profile Source", list_load_files, key="sel_load_file")
+                else:
+                    st.error("No CSV files found!")
+                    st.stop()
 
-        st.info("💲 Tariff")
+        with col_tariff:
+            st.info("⚙️ VPP Setting")
+            vpp_price = st.number_input("Dispatch Price Threshold (AUD/MWh)", 0, 2000, step=10, key="vpp_threshold")
 
-        st.text("Export")
-        exp_price = st.number_input("Flat Price (AUD/kWh)", 0.0, 1.0, 0.08, 0.01, key="exp_tariff")
+            st.info("💲 Tariff")
+            st.text("Export")
+            exp_price = st.number_input("Flat Price (AUD/kWh)", 0.0, 1.0, step=0.01, key="exp_tariff")
 
-        st.text("Import")
-        use_ToU = st.toggle("Flat / Time-Of-Use (ToU)", key="chk_tou")
+            st.text("Import")
+            use_ToU = st.toggle("Flat / Time-Of-Use (ToU)", key="chk_tou")
+            
+            t_utils.initialize_session_state()
+            
+            if use_ToU:
+                st.markdown("Peak Time")
+                c1, c2, c3 = st.columns([1, 1, 1])
+                c1.time_input("Start", key="t_p_start", on_change=t_utils.sync_peak_start)
+                c2.time_input("End", key="t_p_end", on_change=t_utils.sync_peak_end)
+                p_peak = c3.number_input("Price (AUD/kWh)", 0.0, 2.0, step=0.01, key="pp")
+
+                st.markdown("Off-Peak")
+                c1, c2, c3 = st.columns([1, 1, 1])
+                c1.time_input("Start", key="t_o_start", on_change=t_utils.sync_offpeak_start, label_visibility="collapsed")
+                c2.time_input("End", key="t_o_end", on_change=t_utils.sync_offpeak_end, label_visibility="collapsed")
+                p_offpeak = c3.number_input("Price (AUD/kWh)", 0.0, 2.0, step=0.01, label_visibility="collapsed", key="po")
+
+                st.markdown("Shoulder Time")
+                c1, c2, c3 = st.columns([1, 1, 1])
+                c1.time_input("Start", key="t_s_start", on_change=t_utils.sync_shoulder_start, label_visibility="collapsed")
+                c2.time_input("End", key="t_s_end", on_change=t_utils.sync_shoulder_end, label_visibility="collapsed")
+                p_shoulder = c3.number_input("Price (AUD/kWh)", 0.0, 2.0, step=0.01, label_visibility="collapsed", key="ps")
+            else:
+                p_flat = st.number_input("Flat Price (AUD/kWh)", 0.0, 2.0, step=0.01, key="imp_tariff")
+
+    with col_spec:
+        st.subheader("⚙️ System Specification")
         
-        t_utils.initialize_session_state()
-        
-        if use_ToU:
-            st.markdown("Peak Time")
-            c1, c2, c3 = st.columns([1, 1, 1])
-            c1.time_input("Start", key="t_p_start", value=st.session_state.t_p_start, on_change=t_utils.sync_peak_start)
-            c2.time_input("End", key="t_p_end", value=st.session_state.t_p_end, on_change=t_utils.sync_peak_end)
-            p_peak = c3.number_input("Price (AUD/kWh)", 0.0, 2.0, 0.45, 0.01, key="pp")
+        col_panel, col_battery = st.columns(2)
+        with col_panel:
+            st.info("☀️ Solar Panel / Photovoltaics")
+            use_rand_solar = st.toggle("Randomize / Fixed Size", key="chk_solar")
+            if not use_rand_solar:
+                sc1, sc2 = st.columns(2)
+                p_solar_min = sc1.number_input("Min (kWp)", 0.0, 1000.0, step=0.5, key="sol_min")
+                p_solar_max = sc2.number_input("Max (kWp)", 0.0, 1000.0, step=0.5, key="sol_max")
+            else:
+                p_solar_fix = st.number_input("Capacity (kWp)", 1.0, 100.0, step=0.5, key="sol_fix")
 
-            st.markdown("Off-Peak")
-            c1, c2, c3 = st.columns([1, 1, 1])
-            c1.time_input("Start", key="t_o_start", value=st.session_state.t_o_start, on_change=t_utils.sync_offpeak_start, label_visibility="collapsed")
-            c2.time_input("End", key="t_o_end", value=st.session_state.t_o_end, on_change=t_utils.sync_offpeak_end, label_visibility="collapsed")
-            p_offpeak = c3.number_input("Price (AUD/kWh)", 0.0, 2.0, 0.15, 0.01, label_visibility="collapsed", key="po")
+            p_temp = st.number_input("Temp Coeff", -0.01, 0.0, step=0.0001, format="%.4f", key="sol_temp")
+            p_pr = st.number_input("PR (except temperature derated)", 0.5, 1.0, step=0.01, format="%.2f", key="sol_pr")
+            
+        with col_battery:
+            st.info("🔋 Battery")
+            use_rand_bat = st.toggle("Randomize / Fixed Size", key="chk_bat")
+            if not use_rand_bat:
+                bc1, bc2 = st.columns(2)
+                p_bat_min = bc1.number_input("Min (kWh)", 0.0, 1000.0, step=1.0, key="bat_min")
+                p_bat_max = bc2.number_input("Max (kWh)", 0.0, 1000.0, step=1.0, key="bat_max")
+            else:
+                p_bat_fix = st.number_input("Capacity (kWh)", 1.0, 200.0, step=1.0, key="bat_fix")
+            
+            p_eff = st.number_input("Round-Trip Efficiency (%)", 50, 100, key="bat_eff") / 100
+            p_soc = st.slider("Initial SoC (%)", 0, 100, key="bat_soc_init") / 100
+            range_soc = st.slider("SoC Constraint (%)", min_value=0, max_value=100, key="bat_soc_range")
+            p_min_soc = range_soc[0] / 100
+            p_max_soc = range_soc[1] / 100   
 
-            st.markdown("Shoulder Time")
-            c1, c2, c3 = st.columns([1, 1, 1])
-            c1.time_input("Start", key="t_s_start", value=st.session_state.t_s_start, on_change=t_utils.sync_shoulder_start, label_visibility="collapsed")
-            c2.time_input("End", key="t_s_end", value=st.session_state.t_s_end, on_change=t_utils.sync_shoulder_end, label_visibility="collapsed")
-            p_shoulder = c3.number_input("Price (AUD/kWh)", 0.0, 2.0, 0.25, 0.01, label_visibility="collapsed", key="ps")
-        else:
-            p_flat = st.number_input("Flat Price (AUD/kWh)", 0.0, 2.0, 0.2, 0.01, key="imp_tariff")
 
-
-with col_spec:
-    st.subheader("⚙️ System Specification")
-    
-    col_panel, col_battery = st.columns(2)
-    with col_panel:
-        st.info("☀️ Solar Panel / Photovoltaics")
-        use_rand_solar = st.toggle("Randomize / Fixed Size", key="chk_solar")
-        if not use_rand_solar:
-            sc1, sc2 = st.columns(2)
-            p_solar_min = sc1.number_input("Min (kWp)", 0.0, 1000.0, 4.0, step=0.5, key="sol_min")
-            p_solar_max = sc2.number_input("Max (kWp)", 0.0, 1000.0, 6.0, step=0.5, key="sol_max")
-        else:
-            p_solar_fix = st.number_input("Capacity (kWp)", 1.0, 100.0, 5.0, 0.5, key="sol_fix")
-
-        p_temp = st.number_input("Temp Coeff", -0.01, 0.0, -0.004, 0.0001, format="%.4f", key="sol_temp")
-        p_pr = st.number_input("PR (except temperature derated)", 0.5, 1.0, 0.8, 0.01, format="%.2f", key="sol_pr")
-        
-    with col_battery:
-        st.info("🔋 Battery")
-        use_rand_bat = st.toggle("Randomize / Fixed Size", key="chk_bat")
-        if not use_rand_bat:
-            bc1, bc2 = st.columns(2)
-            p_bat_min = bc1.number_input("Min (kWh)", 0.0, 1000.0, 8.0, step=1.0, key="bat_min")
-            p_bat_max = bc2.number_input("Max (kWh)", 0.0, 1000.0, 12.0, step=1.0, key="bat_max")
-        else:
-            p_bat_fix = st.number_input("Capacity (kWh)", 1.0, 200.0, 10.0, 1.0, key="bat_fix")
-
-        b1, b2 = st.columns(2)
-        p_charger_pwr = b1.number_input("(-) Charge (kW)", 0, 10, 5, 1, key="bat_chg")
-        p_discharger_pwr = b2.number_input("(+) Discharge (kW)", 0, 10, 5, 1, key="bat_dis")
-        p_eff = st.number_input("Round-Trip Efficiency (%)", 50, 100, 95, key="bat_eff") / 100
-        p_soc = st.slider("Initial SoC (%)", 0, 100, 50, key="bat_soc_init") / 100
-        range_soc = st.slider("SoC Constraint (%)", min_value=0, max_value=100, value=(10, 90), key="bat_soc_range")
-        p_min_soc = range_soc[0] / 100
-        p_max_soc = range_soc[1] / 100              
+else :
+    active_cfg = st.session_state.get('active_config', 'Default')
+    st.info(f"👋 **Welcome!**  \n\nClick the button below to generate your dataset.")
+            
 
 st.markdown("---")
-btn_run = st.button("Process Parameter and Generate Data", type="primary", use_container_width=True)
+btn_run = st.button("Generate Data", type="primary", use_container_width=True)
 
 if btn_run:
+    if st.session_state['role'] == 'student':
+        df_hist = cfg.load_config_history()
+        if not df_hist.empty:
+            active_cfg = st.session_state.get('active_config')
+            matched = df_hist[df_hist['Config_Name'] == active_cfg] if active_cfg else pd.DataFrame()
+            if not matched.empty:
+                cfg.apply_row_to_session(matched.iloc[0])
+            else:
+                cfg.apply_row_to_session(df_hist.iloc[0])
+
+
+    use_rand_location = st.session_state.get('chk_loc', False)
+    use_rand_load = st.session_state.get('chk_load', False)
+    use_rand_solar = st.session_state.get('chk_solar', False)
+    use_rand_bat = st.session_state.get('chk_bat', False)
+
+    p_solar_min = st.session_state.get('sol_min', 4.0)
+    p_solar_max = st.session_state.get('sol_max', 6.0)
+    p_solar_fix = st.session_state.get('sol_fix', 5.0)
+    p_temp = st.session_state.get('sol_temp', -0.004)
+    p_pr = st.session_state.get('sol_pr', 0.8)
+
+    p_bat_min = st.session_state.get('bat_min', 8.0)
+    p_bat_max = st.session_state.get('bat_max', 12.0)
+    p_bat_fix = st.session_state.get('bat_fix', 10.0)
+    p_eff = st.session_state.get('bat_eff', 95) / 100
+    p_soc = st.session_state.get('bat_soc_init', 50) / 100
+    range_soc = st.session_state.get('bat_soc_range', (10, 90))
+    p_min_soc = range_soc[0] / 100
+    p_max_soc = range_soc[1] / 100
+
+    vpp_price = st.session_state.get('vpp_threshold', 800)
+    exp_price = st.session_state.get('exp_tariff', 0.08)
+    use_ToU = st.session_state.get('chk_tou', False)
+    p_peak = st.session_state.get('pp', 0.45)
+    p_offpeak = st.session_state.get('po', 0.15)
+    p_shoulder = st.session_state.get('ps', 0.25)
+    p_flat = st.session_state.get('imp_tariff', 0.20)
+
+    selected_load_file = st.session_state.get('sel_load_file', None)
+    start_y = st.session_state.get('date_start', 2020)
+    end_y = st.session_state.get('date_end', 2020)
+
+    # --- LOGIKA LOKASI ---
+    if not use_rand_location:
+        list_lokasi = loader.get_list_lokasi()
+        selected_loc = random.choice(list_lokasi)
+        list_titik_random = loader.get_list_titik(selected_loc)
+        selected_point = random.choice(list_titik_random) if list_titik_random else None
+    else:
+        selected_loc = st.session_state.get('loc_region')
+        selected_point = st.session_state.get('loc_point')
+
+    # --- KALKULASI SOLAR ---
     is_solar_fixed = False 
     if not use_rand_solar:
         final_p_solar = round(random.uniform(p_solar_min, p_solar_max), 2)
-        
     else:
         final_p_solar = p_solar_fix
         is_solar_fixed = True
 
-
+    # --- KALKULASI BATERAI ---
     if not use_rand_bat:
-
         segment = 5
         bat_total_range = p_bat_max - p_bat_min
         bat_segment_width = bat_total_range / segment
@@ -219,10 +332,8 @@ if btn_run:
             mid = (segment - 1) // 2
             start_seg = max(0, mid - 1)
             end_seg   = min(segment - 1, mid + 1)
-
         else:
             solar_range = p_solar_max - p_solar_min
-
             if solar_range <= 0:
                 current_segment = (segment - 1) // 2
             else:
@@ -235,13 +346,14 @@ if btn_run:
 
         final_bat_min = p_bat_min + (start_seg * bat_segment_width)
         final_bat_max = p_bat_min + ((end_seg + 1) * bat_segment_width)
-
         final_p_bat = round(random.uniform(final_bat_min, final_bat_max), 2)
-
     else:
         final_p_bat = p_bat_fix
 
+    # power Charger/Discharge battery
+    auto_charge_power = math.ceil(final_p_bat * 0.4)
 
+    # --- KALKULASI BEBAN ---
     if not use_rand_load:
         all_files = loader.get_list_load_profiles()
         if all_files:
@@ -270,15 +382,15 @@ if btn_run:
             'battery_capacity_kwh': final_p_bat, 
             'battery_efficiency': p_eff,
             'battery_initial_soc': p_soc,
-            'max_charge_kw': p_charger_pwr,
-            'max_discharge_kw': p_discharger_pwr,
+            'max_charge_kw': auto_charge_power,
+            'max_discharge_kw': auto_charge_power,
             'soc_min_pct': p_min_soc,
             'soc_max_pct': p_max_soc,
             'dispatch_price_threshold': vpp_price, 
-            't_offpeak_start': st.session_state.t_o_start,
-            't_offpeak_end': st.session_state.t_o_end,
-            't_peak_start': st.session_state.t_p_start,
-            't_peak_end': st.session_state.t_p_end
+            't_offpeak_start': st.session_state.get('t_o_start', time(22,0)),
+            't_offpeak_end': st.session_state.get('t_o_end', time(6,0)),
+            't_peak_start': st.session_state.get('t_p_start', time(17,0)),
+            't_peak_end': st.session_state.get('t_p_end', time(20,0))
         }
         
         with st.spinner("Calculate Energy Flow..."):
@@ -295,14 +407,14 @@ if btn_run:
         if use_ToU:
             tariff_snapshot.update({
                 'peak_price': p_peak,
-                'peak_start': st.session_state.t_p_start.strftime("%H:%M"),
-                'peak_end': st.session_state.t_p_end.strftime("%H:%M"),
+                'peak_start': st.session_state.get('t_p_start', time(17,0)).strftime("%H:%M"),
+                'peak_end': st.session_state.get('t_p_end', time(20,0)).strftime("%H:%M"),
                 'offpeak_price': p_offpeak,
-                'offpeak_start': st.session_state.t_o_start.strftime("%H:%M"),
-                'offpeak_end': st.session_state.t_o_end.strftime("%H:%M"),
+                'offpeak_start': st.session_state.get('t_o_start', time(22,0)).strftime("%H:%M"),
+                'offpeak_end': st.session_state.get('t_o_end', time(6,0)).strftime("%H:%M"),
                 'shoulder_price': p_shoulder,
-                'shoulder_start': st.session_state.t_s_start.strftime("%H:%M"),
-                'shoulder_end': st.session_state.t_s_end.strftime("%H:%M"),
+                'shoulder_start': st.session_state.get('t_s_start', time(14,0)).strftime("%H:%M"),
+                'shoulder_end': st.session_state.get('t_s_end', time(17,0)).strftime("%H:%M"),
             })
         else:
             tariff_snapshot['import_flat'] = p_flat
@@ -314,8 +426,8 @@ if btn_run:
             'bat': final_p_bat,
             'bat_eff': p_eff,
             'bat_soc_init': p_soc,
-            'bat_charge_kw': p_charger_pwr,
-            'bat_discharge_kw': p_discharger_pwr,
+            'bat_charge_kw': auto_charge_power,
+            'bat_discharge_kw': auto_charge_power,
             'soc_min': p_min_soc,
             'soc_max': p_max_soc,
             'vpp_thresh': vpp_price,
@@ -370,7 +482,7 @@ if st.session_state['hasil_simulasi'] is not None:
             - Initial SoC: **{int(used_p['bat_soc_init']*100)}%**
             """)
 
-    with st.expander("💲 View Applied Tariff Details", expanded=True):
+    with st.expander("💲 View Applied Tariff Details", expanded=False):
         tc1, tc2 = st.columns(2)
         with tc1:
             st.markdown(f"**Export Tariff:**")
@@ -423,43 +535,47 @@ if st.session_state['hasil_simulasi'] is not None:
         key='download-csv' 
     )
 
-    st.divider()
-    st.subheader("📊 Detailed Analysis")
-    
-    df_result['year']  = df_result['timestamp'].dt.year
-    df_result['month'] = df_result['timestamp'].dt.month
-    
-    available_years_vis = sorted(df_result['year'].unique())
-    selected_vis_year = st.selectbox("Select Year:", available_years_vis)
-    df_vis_year = df_result[df_result['year'] == selected_vis_year].copy()
-    
-    factor = 5/60
-    col_load = 'load_profile' if 'load_profile' in df_vis_year.columns else 'beban_rumah_kw'
-    col_bat  = 'battery_power_ac_kw' if 'battery_power_ac_kw' in df_vis_year.columns else 'battery_power_kw'
-    
-    total_solar = df_vis_year['solar_output_kw'].sum() * factor
-    total_load  = df_vis_year[col_load].sum() * factor
-    total_import = df_vis_year['grid_net_kw'].apply(lambda x: x if x > 0 else 0).sum() * factor
-    
-    m1, m2, m3 = st.columns(3)
-    m1.metric(f"Total Solar ({selected_vis_year})", f"{total_solar:,.2f} kWh")
-    m2.metric(f"Total Load ({selected_vis_year})", f"{total_load:,.2f} kWh")
-    m3.metric(f"Grid Import ({selected_vis_year})", f"{total_import:,.2f} kWh", delta_color="inverse")
-
-    visualizer.plot_annual_overview(df_vis_year, col_bat, selected_vis_year)
-    
-    st.divider()
-
-    @st.fragment
-    def show_monthly_analysis_fragment():
-        available_months = sorted(df_vis_year['month'].unique())
-        month_map = {m: calendar.month_name[m] for m in available_months}
+    # ==========================================
+    # BAGIAN VISUALISASI GRAFIK (HANYA ADMIN)
+    # ==========================================
+    if st.session_state.get('role', 'student') == 'admin':
+        st.divider()
+        st.subheader("📊 Detailed Analysis (Admin Only)")
         
-        selected_month_name = st.selectbox("Select Month for Profile:", list(month_map.values()))
+        df_result['year']  = df_result['timestamp'].dt.year
+        df_result['month'] = df_result['timestamp'].dt.month
         
-        selected_vis_month = [k for k, v in month_map.items() if v == selected_month_name][0]
-        df_vis_month = df_vis_year[df_vis_year['month'] == selected_vis_month].copy()
+        available_years_vis = sorted(df_result['year'].unique())
+        selected_vis_year = st.selectbox("Select Year:", available_years_vis)
+        df_vis_year = df_result[df_result['year'] == selected_vis_year].copy()
         
-        visualizer.plot_monthly_analysis(df_vis_month, col_load, selected_month_name, selected_vis_year)
+        factor = 5/60
+        col_load = 'load_profile' if 'load_profile' in df_vis_year.columns else 'beban_rumah_kw'
+        col_bat  = 'battery_power_ac_kw' if 'battery_power_ac_kw' in df_vis_year.columns else 'battery_power_kw'
+        
+        total_solar = df_vis_year['solar_output_kw'].sum() * factor
+        total_load  = df_vis_year[col_load].sum() * factor
+        total_import = df_vis_year['grid_net_kw'].apply(lambda x: x if x > 0 else 0).sum() * factor
+        
+        m1, m2, m3 = st.columns(3)
+        m1.metric(f"Total Solar ({selected_vis_year})", f"{total_solar:,.2f} kWh")
+        m2.metric(f"Total Load ({selected_vis_year})", f"{total_load:,.2f} kWh")
+        m3.metric(f"Grid Import ({selected_vis_year})", f"{total_import:,.2f} kWh", delta_color="inverse")
 
-    show_monthly_analysis_fragment()
+        visualizer.plot_annual_overview(df_vis_year, col_bat, selected_vis_year)
+        
+        st.divider()
+
+        @st.fragment
+        def show_monthly_analysis_fragment():
+            available_months = sorted(df_vis_year['month'].unique())
+            month_map = {m: calendar.month_name[m] for m in available_months}
+            
+            selected_month_name = st.selectbox("Select Month for Profile:", list(month_map.values()))
+            
+            selected_vis_month = [k for k, v in month_map.items() if v == selected_month_name][0]
+            df_vis_month = df_vis_year[df_vis_year['month'] == selected_vis_month].copy()
+            
+            visualizer.plot_monthly_analysis(df_vis_month, col_load, selected_month_name, selected_vis_year)
+
+        show_monthly_analysis_fragment()
