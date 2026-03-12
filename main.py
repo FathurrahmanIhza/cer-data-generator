@@ -181,8 +181,14 @@ if st.session_state['role'] == 'admin':
                 if list_load_files:
                     selected_load_file = st.selectbox("Select Profile Source", list_load_files, key="sel_load_file")
                 else:
-                    st.error("No CSV files found!")
+                    st.error("No Parquet/CSV files found!")
                     st.stop()
+            else:
+                st.selectbox(
+                    "Randomize Category", 
+                    options=["All", "Small", "Medium", "Large"], 
+                    key="sel_load_category"
+                )
 
         with col_tariff:
             st.info("⚙️ VPP Setting")
@@ -354,15 +360,27 @@ if btn_run:
     auto_charge_power = math.ceil(final_p_bat * 0.4)
 
     # --- KALKULASI BEBAN ---
-    if not use_rand_load:
-        all_files = loader.get_list_load_profiles()
-        if all_files:
-            final_load_file = random.choice(all_files)
-        else:
-            st.error("❌ No CSV files found in dataset/load_profile!")
-            st.stop()
-    else:
+    if use_rand_load: 
         final_load_file = selected_load_file
+    else: 
+        all_files = loader.get_list_load_profiles()
+        
+        load_category = st.session_state.get('sel_load_category', 'All')
+
+        if load_category == "Small":
+            filtered_files = [f for f in all_files if f.startswith("SML")]
+        elif load_category == "Medium":
+            filtered_files = [f for f in all_files if f.startswith("MDM")]
+        elif load_category == "Large":
+            filtered_files = [f for f in all_files if f.startswith("LRG")]
+        else:
+            filtered_files = all_files 
+
+        if filtered_files:
+            final_load_file = random.choice(filtered_files)
+        else:
+            st.error(f"❌ No files found for category: {load_category}!")
+            st.stop()
 
     with st.spinner(f"Combine data {selected_loc} ({selected_point}) dari {start_y}-{end_y}..."):
         df_input = loader.load_and_merge_data(
@@ -390,7 +408,15 @@ if btn_run:
             't_offpeak_start': st.session_state.get('t_o_start', time(22,0)),
             't_offpeak_end': st.session_state.get('t_o_end', time(6,0)),
             't_peak_start': st.session_state.get('t_p_start', time(17,0)),
-            't_peak_end': st.session_state.get('t_p_end', time(20,0))
+            't_peak_end': st.session_state.get('t_p_end', time(20,0)),
+            't_shoulder_start': st.session_state.get('t_s_start', time(14,0)),
+            't_shoulder_end': st.session_state.get('t_s_end', time(17,0)),
+            'is_tou': use_ToU,
+            'export_price': exp_price,
+            'import_flat': p_flat,
+            'peak_price': p_peak,
+            'offpeak_price': p_offpeak,
+            'shoulder_price': p_shoulder
         }
         
         with st.spinner("Calculate Energy Flow..."):
@@ -511,9 +537,12 @@ if st.session_state['hasil_simulasi'] is not None:
         'solar_output_kw', 
         'load_profile',
         'price_profile',       
-        'battery_soc_pct',     
+        'battery_soc_pct',
+        'battery_soc_kwh',     
         'battery_power_ac_kw',
         'grid_net_kw',
+        'tariff_import_AUD',
+        'tariff_export_AUD'
     ]
     final_cols = [c for c in output_columns if c in df_export.columns]
     df_export = df_export[final_cols]
