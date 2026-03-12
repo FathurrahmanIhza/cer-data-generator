@@ -178,6 +178,35 @@ def run_simulation(df, params):
     
     if 'price_import' in df_res.columns:
         df_res.rename(columns={'price_import': 'price_profile'}, inplace=True)
+
+    # Hitung Kapasitas Baterai kWh
+    df_res['battery_soc_kwh'] = (df_res['battery_soc_pct'] / 100.0) * params['battery_capacity_kwh']
+    
+    # 2. Hitung Tarif Ekspor & Impor
+    df_res['tariff_export_AUD'] = params['export_price']
+    
+    if params['is_tou']:
+        p_start = params['t_peak_start'].hour
+        p_end = params['t_peak_end'].hour
+        s_start = params['t_shoulder_start'].hour
+        s_end = params['t_shoulder_end'].hour
+        
+        prices = [params['offpeak_price']] * 24
+        
+        def fill_prices(start, end, val, arr):
+            if start < end:
+                for h in range(start, end): arr[h] = val
+            else:
+                for h in range(start, 24): arr[h] = val
+                for h in range(0, end): arr[h] = val
+            return arr
+            
+        prices = fill_prices(s_start, s_end, params['shoulder_price'], prices)
+        prices = fill_prices(p_start, p_end, params['peak_price'], prices)
+        
+        df_res['tariff_import_AUD'] = df_res['timestamp'].dt.hour.map(lambda h: prices[h])
+    else:
+        df_res['tariff_import_AUD'] = params['import_flat']
         
     final_cols = [
         'timestamp',
@@ -188,8 +217,11 @@ def run_simulation(df, params):
         'solar_output_kw',
         'vpp_status',
         'battery_soc_pct',
+        'battery_soc_kwh',
         'battery_power_ac_kw',
-        'grid_net_kw'
+        'grid_net_kw',
+        'tariff_import_AUD',
+        'tariff_export_AUD'
     ]
     
     avail_cols = [c for c in final_cols if c in df_res.columns]
