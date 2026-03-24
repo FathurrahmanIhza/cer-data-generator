@@ -10,7 +10,7 @@ def init_default_states():
     defaults = {
         "chk_loc": False,
         "chk_load": False,
-        "sel_load_category": "All",
+        "load_mult": 15.0,
         "chk_solar": False,
         "chk_bat": False,
         "chk_tou": False,
@@ -45,7 +45,7 @@ def get_gsheets_connection():
 def load_config_history():
     try:
         conn = get_gsheets_connection()
-        df_history = conn.read(worksheet=TAB_CONFIG, ttl=300) 
+        df_history = conn.read(worksheet=TAB_CONFIG, ttl=30) 
         if df_history is None or df_history.empty:
             return pd.DataFrame()
         if 'Config_Name' not in df_history.columns:
@@ -74,7 +74,7 @@ def save_config_to_sheets(config_name, current_state):
             "point_fix": current_state.get("loc_point", ""),
             "use_rand_load_profile": current_state.get("chk_load", False),
             "load_profile_fix": current_state.get("sel_load_file", ""),
-            "load_category": current_state.get("sel_load_category", "All"),
+            "load_mult": current_state.get("load_mult", 15.0),
             "use_rand_solar": current_state.get("chk_solar", False),
             "solar_min": current_state.get("sol_min", 4.0),
             "solar_max": current_state.get("sol_max", 6.0),
@@ -118,7 +118,7 @@ def apply_row_to_session(selected_row):
     mapping = {
         "use_rand_location": "chk_loc", "region_fix": "loc_region", "point_fix": "loc_point",
         "use_rand_load_profile": "chk_load", "load_profile_fix": "sel_load_file",
-        "load_category": "sel_load_category",
+        "load_mult": "load_mult",
         "use_rand_solar": "chk_solar", "solar_min": "sol_min", "solar_max": "sol_max",
         "solar_fix": "sol_fix", "temp_coeff": "sol_temp", "pr": "sol_pr",
         "use_rand_bat": "chk_bat", "bat_min": "bat_min", "bat_max": "bat_max",
@@ -147,7 +147,7 @@ def apply_row_to_session(selected_row):
                         st.session_state[widget_key] = int(float(val) * 100)
                     elif widget_key in ["vpp_threshold", "bat_eff", "date_start", "date_end"]:
                         st.session_state[widget_key] = int(float(val))
-                    elif widget_key in ["sol_min", "sol_max", "sol_fix", "sol_temp", "sol_pr", "bat_min", "bat_max", "bat_fix", "exp_tariff", "imp_tariff", "pp", "po", "ps"]:
+                    elif widget_key in ["load_mult","sol_min", "sol_max", "sol_fix", "sol_temp", "sol_pr", "bat_min", "bat_max", "bat_fix", "exp_tariff", "imp_tariff", "pp", "po", "ps"]:
                         st.session_state[widget_key] = float(val)
                     else:
                         st.session_state[widget_key] = val
