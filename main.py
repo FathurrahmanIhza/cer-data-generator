@@ -514,7 +514,7 @@ if st.session_state['role'] == 'admin':
 else :
     
     active_cfg = st.session_state.get('active_config', 'Default')
-    st.info(f"**Welcome!**  \n\nClick the button below to generate your dataset.")
+    st.info(f"👋 **Welcome!**  \n\nClick the button below to generate your dataset.")
             
     student_nim = st.text_input("Student ID", placeholder="eg: z5593968").strip()
     st.session_state['current_nim'] = student_nim
@@ -886,9 +886,6 @@ if st.session_state['hasil_simulasi'] is not None:
             m2.metric(f"Total Load ({selected_vis_year})", f"{total_load:,.2f} kWh")
             m3.metric(f"Grid Import ({selected_vis_year})", f"{total_import:,.2f} kWh", delta_color="inverse")
 
-<<<<<<< HEAD
-        show_monthly_analysis_fragment()
-=======
             visualizer.plot_annual_overview(df_vis_year, col_bat, selected_vis_year)
             
             st.divider()
@@ -906,4 +903,3 @@ if st.session_state['hasil_simulasi'] is not None:
                 visualizer.plot_monthly_analysis(df_vis_month, col_load, selected_month_name, selected_vis_year)
 
             show_monthly_analysis_fragment()
->>>>>>> 5feddb1 (Create Student Data Tracker)
