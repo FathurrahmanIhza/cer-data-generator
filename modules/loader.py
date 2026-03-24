@@ -29,8 +29,8 @@ def get_available_years(nama_lokasi, nama_titik):
     files = os.listdir(path_price)
     years = []
     for f in files:
-        if f.endswith('.csv'):
-            try: years.append(int(f.replace('.csv', '')))
+        if f.endswith('.parquet'):
+            try: years.append(int(f.replace('.parquet', '')))
             except ValueError: pass 
     return sorted(years)
 
