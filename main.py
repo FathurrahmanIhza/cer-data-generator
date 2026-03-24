@@ -514,7 +514,7 @@ if st.session_state['role'] == 'admin':
 else :
     
     active_cfg = st.session_state.get('active_config', 'Default')
-    st.info(f"👋 **Welcome!**  \n\nClick the button below to generate your dataset.")
+    st.info(f"**Welcome!**  \n\nClick the button below to generate your dataset.")
             
     student_nim = st.text_input("Student ID", placeholder="eg: z5593968").strip()
     st.session_state['current_nim'] = student_nim
