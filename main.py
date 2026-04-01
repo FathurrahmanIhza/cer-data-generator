@@ -13,7 +13,7 @@ from modules import tariff_utils as t_utils
 from modules import visualizer
 from modules import config as cfg 
 from modules import student_log as s_log
-from st_aggrid import AgGrid, GridOptionsBuilder, GridUpdateMode
+from st_aggrid import AgGrid, GridOptionsBuilder
 
 st.set_page_config(page_title="CER Simulation Data Generator", layout="wide")
 
@@ -379,10 +379,10 @@ if st.session_state['role'] == 'admin':
             grid_response = AgGrid(
                 df_logs,
                 gridOptions=gridOptions,
-                update_mode=GridUpdateMode.SELECTION_CHANGED,
-                fit_columns_on_grid_load=True,
+                update_on=['selectionChanged'], 
+                fit_columns_on_grid_load=False, 
                 theme='streamlit', 
-                height=400
+                height=375
             )
             
             st.divider()
