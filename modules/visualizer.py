@@ -55,6 +55,7 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
         ax1.grid(axis='y', alpha=0.3)
         plt.tight_layout() 
         st.pyplot(fig1)
+        plt.close(fig1)
 
     with c2:
         fig2, ax2 = plt.subplots(figsize=(6, 4))
@@ -69,6 +70,7 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
         ax2.grid(axis='y', alpha=0.3)
         plt.tight_layout() 
         st.pyplot(fig2)
+        plt.close(fig2)
 
     # --- VISUALISASI BARIS 2 (HEATMAPS) ---
     c3, c4 = st.columns(2)
@@ -108,6 +110,7 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
             
             plt.tight_layout()
             st.pyplot(fig_heat)
+            plt.close(fig_heat)
         else:
             st.info("No VPP Status Data Available")
 
@@ -140,6 +143,7 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
             
             plt.tight_layout()
             st.pyplot(fig_neg)
+            plt.close(fig_neg)
         else:
             st.info("Price Data Not Available")
 
@@ -213,6 +217,7 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
         ax_p.legend(loc='upper right', fontsize='small')
         
         st.pyplot(fig_price)
+        plt.close(fig_price)
     else:
         st.warning("Price profile data not found.")
     
@@ -242,6 +247,7 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
         ax_g.legend(loc='upper right', fontsize='small')
         
         st.pyplot(fig_grid)
+        plt.close(fig_grid)
     else:
         st.warning("Grid interaction data not found.")
 
@@ -286,6 +292,7 @@ def plot_monthly_analysis(df_vis_month, col_load, selected_month_name, selected_
         
         plt.tight_layout()
         st.pyplot(fig_prof)
+        plt.close(fig_prof)
 
     with c2:
         factor = 5.0/60.0
@@ -313,3 +320,4 @@ def plot_monthly_analysis(df_vis_month, col_load, selected_month_name, selected_
         cbar_sol.set_label("Irradiance ($Wh/m^2$)")
         plt.tight_layout()
         st.pyplot(fig_h_sol)
+        plt.close(fig_h_sol)

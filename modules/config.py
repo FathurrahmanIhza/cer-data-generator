@@ -8,6 +8,8 @@ TAB_CONFIG = "Config_History"
 def init_default_states():
     """Mengisi nilai default ke dalam memori agar widget tidak bentrok (tanpa warning)"""
     defaults = {
+        "chk_dur": False,
+        "rand_dur_years": 1,
         "chk_loc": False,
         "chk_load": False,
         "load_mult": 15.0,
@@ -67,6 +69,8 @@ def save_config_to_sheets(config_name, current_state):
         new_row = {
             "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "Config_Name": config_name,
+            "use_rand_duration": current_state.get("chk_dur", False),
+            "rand_dur_years": current_state.get("rand_dur_years", 1),
             "start_year": current_state.get("date_start", 2020),
             "end_year": current_state.get("date_end", 2020),
             "use_rand_location": current_state.get("chk_loc", True),
@@ -111,11 +115,13 @@ def save_config_to_sheets(config_name, current_state):
         st.cache_data.clear()
         return True
     except Exception as e:
-        st.error(f"⚠️ Failed To Save Config: {e}")
+        st.error(f"⚠️ Failed to Save Config: {e}")
         return False
     
 def apply_row_to_session(selected_row):
     mapping = {
+        "use_rand_duration": "chk_dur",
+        "rand_dur_years": "rand_dur_years",
         "use_rand_location": "chk_loc", "region_fix": "loc_region", "point_fix": "loc_point",
         "use_rand_load_profile": "chk_load", "load_profile_fix": "sel_load_file",
         "load_mult": "load_mult",
@@ -138,14 +144,19 @@ def apply_row_to_session(selected_row):
                     st.session_state[widget_key] = time(h, m)
                 except: pass
             elif widget_key.startswith("chk_"):
-                if pd.isna(val): st.session_state[widget_key] = False
-                elif isinstance(val, str): st.session_state[widget_key] = (val.strip().upper() == "TRUE")
-                else: st.session_state[widget_key] = bool(val)
+                if pd.isna(val): 
+                    st.session_state[widget_key] = False
+                else:
+                    teks_val = str(val).strip().upper()
+                    if teks_val in ["TRUE", "1", "1.0"]:
+                        st.session_state[widget_key] = True
+                    else:
+                        st.session_state[widget_key] = False
             else:
                 if not pd.isna(val):
                     if db_col == "bat_init_soc":
                         st.session_state[widget_key] = int(float(val) * 100)
-                    elif widget_key in ["vpp_threshold", "bat_eff", "date_start", "date_end"]:
+                    elif widget_key in ["vpp_threshold", "bat_eff", "date_start", "date_end", "rand_dur_years"]:
                         st.session_state[widget_key] = int(float(val))
                     elif widget_key in ["load_mult","sol_min", "sol_max", "sol_fix", "sol_temp", "sol_pr", "bat_min", "bat_max", "bat_fix", "exp_tariff", "imp_tariff", "pp", "po", "ps"]:
                         st.session_state[widget_key] = float(val)

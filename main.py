@@ -112,7 +112,7 @@ if st.session_state['role'] == 'admin':
                     success = cfg.save_config_to_sheets(new_config_name, st.session_state)
                     if success:
                         st.session_state['active_config'] = new_config_name
-                        st.success("✅ Succesfully Saved Config!")
+                        st.success("✅ Successfully Saved Config!")
                         tm.sleep(1)
                         st.rerun()
         st.divider()
@@ -121,12 +121,12 @@ if st.session_state['role'] == 'admin':
 
     
     with tab_config:
-        st.markdown("Set parameter region and period to start generate data")
+        st.markdown("Set region and period parameters to generate data")
 
         col_dp, col_spec = st.columns([1, 1], gap="medium")
 
         with col_dp:
-            st.subheader("📁 Data Parameter")
+            st.subheader("📁 Data Parameters")
             col_location, col_tariff = st.columns([1, 1.4])
 
             with col_location:
@@ -141,41 +141,81 @@ if st.session_state['role'] == 'admin':
                 selected_loc = None
                 selected_point = None
 
-                if use_rand_location: 
+                if use_rand_location:
                     l1, l2 = st.columns(2)
-                    selected_loc = l1.selectbox("1. Choose Region", list_lokasi, key="loc_region")
+                    
+                    saved_region = st.session_state.get('loc_region', list_lokasi[0])
+                    idx_reg = list_lokasi.index(saved_region) if saved_region in list_lokasi else 0
+                    
+                    ui_region = l1.selectbox("1. Choose Region", list_lokasi, index=idx_reg, key="ui_loc_region")
+                    st.session_state['loc_region'] = ui_region
+                    selected_loc = ui_region
+                    
                     list_titik = loader.get_list_titik(selected_loc)
-                    selected_point = l2.selectbox("2. Choose Point", list_titik, key="loc_point")
+                    
+                    list_titik_extended = ["Randomize"] + list_titik 
+                    
+                    saved_point = st.session_state.get('loc_point', list_titik_extended[0])
+                    idx_pt = list_titik_extended.index(saved_point) if saved_point in list_titik_extended else 0
+                    
+                    ui_point = l2.selectbox("2. Choose Point", list_titik_extended, index=idx_pt, key="ui_loc_point")
+                    st.session_state['loc_point'] = ui_point 
+
+                    if ui_point == "Randomize":
+                        selected_point = random.choice(list_titik) if list_titik else None
+                    else:
+                        selected_point = ui_point
+                        
                 else: 
                     selected_loc = random.choice(list_lokasi)
                     list_titik_random = loader.get_list_titik(selected_loc)
                     selected_point = random.choice(list_titik_random) if list_titik_random else None
                 
+
+
                 available_years = loader.get_available_years(selected_loc, selected_point)
                 
                 st.info("🕒 Duration")
                 if available_years:
-                    min_year, max_year = min(available_years), max(available_years)
-                    y1, y2 = st.columns(2)
+                    use_rand_dur = st.toggle("Randomize / Fixed Duration", key="chk_dur")
                     
-                    start_kwargs = {}
-                    if "date_start" not in st.session_state:
-                        start_kwargs["index"] = 0 
+                    if use_rand_dur: 
+                        min_year, max_year = min(available_years), max(available_years)
+                        y1, y2 = st.columns(2)
                         
-                    start_y = y1.selectbox("Start Date", available_years, key="date_start", **start_kwargs)
-                    
-                    valid_end_years = [y for y in available_years if y >= start_y]
-                    end_kwargs = {}
-                    
-                    if "date_end" not in st.session_state:
-                        end_kwargs["index"] = len(valid_end_years) - 1
-                    elif st.session_state["date_end"] not in valid_end_years:
-                        st.session_state["date_end"] = valid_end_years[-1]
+                        start_kwargs = {}
+                        if "date_start" not in st.session_state:
+                            start_kwargs["index"] = 0 
+                            
+                        start_y = y1.selectbox("Start Date", available_years, key="date_start", **start_kwargs)
                         
-                    end_y = y2.selectbox("End Date", valid_end_years, key="date_end", **end_kwargs)
-                    
+                        valid_end_years = [y for y in available_years if y >= start_y]
+                        end_kwargs = {}
+                        
+                        if "date_end" not in st.session_state:
+                            end_kwargs["index"] = len(valid_end_years) - 1
+                        elif st.session_state["date_end"] not in valid_end_years:
+                            st.session_state["date_end"] = valid_end_years[-1]
+                            
+                        end_y = y2.selectbox("End Date", valid_end_years, key="date_end", **end_kwargs)
+                        
+                    else: 
+                        total_years = len(available_years)
+                        
+                        saved_rand_dur = st.session_state.get('rand_dur_years', 1)
+                        saved_rand_dur = min(saved_rand_dur, total_years) 
+                        
+                        ui_dur = st.number_input(
+                            f"Duration (Years)", 
+                            min_value=1, 
+                            max_value=total_years, 
+                            value=int(saved_rand_dur), 
+                            key="ui_rand_dur_years"
+                        )
+                        st.session_state['rand_dur_years'] = ui_dur
+                        
                 else:
-                    st.warning("There is no data on this point!")
+                    st.warning("No data available for this location!")
                     st.stop()
 
                 st.info("🏠 Load Profile")
@@ -214,7 +254,7 @@ if st.session_state['role'] == 'admin':
                 
 
             with col_tariff:
-                st.info("⚙️ VPP Setting")
+                st.info("⚙️ VPP Settings")
                 vpp_price = st.number_input("Dispatch Price Threshold (AUD/MWh)", 0, 2000, step=10, key="vpp_threshold")
 
                 st.info("💲 Tariff")
@@ -248,7 +288,7 @@ if st.session_state['role'] == 'admin':
                     p_flat = st.number_input("Flat Price (AUD/kWh)", 0.0, 2.0, step=0.01, key="imp_tariff")
 
         with col_spec:
-            st.subheader("⚙️ System Specification")
+            st.subheader("⚙️ System Specifications")
             
             col_panel, col_battery = st.columns(2)
             with col_panel:
@@ -385,7 +425,7 @@ if st.session_state['role'] == 'admin':
                             )
                             
                             if df_input_regen is None:
-                                st.error(f"❌ Dataset Fail to Load! Check Folder 'dataset/{reg}/{pt}'")
+                                st.error(f"❌ Dataset Failed to Load! Check Folder 'dataset/{reg}/{pt}'")
                             else:
                                 col_load_regen = 'load_profile' if 'load_profile' in df_input_regen.columns else 'beban_rumah_kw'
                                 df_input_regen[col_load_regen] = df_input_regen[col_load_regen] * saved_params['load_multiplier']
@@ -514,7 +554,7 @@ if st.session_state['role'] == 'admin':
 else :
     
     active_cfg = st.session_state.get('active_config', 'Default')
-    st.info(f"**Welcome!**  \n\nClick the button below to generate your dataset.")
+    st.info(f"👋 **Welcome!**  \n\nClick the button below to generate your dataset.")
             
     student_nim = st.text_input("Student ID", placeholder="eg: z5593968").strip()
     st.session_state['current_nim'] = student_nim
@@ -527,7 +567,7 @@ else :
 if btn_run:
     if st.session_state['role'] == 'student':
         if not st.session_state.get('current_nim'):
-            st.warning("⚠️ Please Input Your Student ID!")
+            st.warning("⚠️ Please Enter Your Student ID!")
             st.stop()
 
         df_hist = cfg.load_config_history()
@@ -578,18 +618,49 @@ if btn_run:
     p_flat = st.session_state.get('imp_tariff', 0.20)
 
     selected_load_file = st.session_state.get('sel_load_file', None)
-    start_y = st.session_state.get('date_start', 2020)
-    end_y = st.session_state.get('date_end', 2020)
+    # start_y = st.session_state.get('date_start', 2020)
+    # end_y = st.session_state.get('date_end', 2020)
 
     # --- KALKULASI LOKASI ---
     if use_rand_location: 
         selected_loc = st.session_state.get('loc_region')
-        selected_point = st.session_state.get('loc_point')
+        raw_point = st.session_state.get('loc_point')
+        
+        if raw_point == "Randomize":
+            list_titik = loader.get_list_titik(selected_loc)
+            selected_point = random.choice(list_titik) if list_titik else None
+        else:
+            selected_point = raw_point
+            
     else: 
         list_lokasi = loader.get_list_lokasi()
         selected_loc = random.choice(list_lokasi)
         list_titik_random = loader.get_list_titik(selected_loc)
         selected_point = random.choice(list_titik_random) if list_titik_random else None
+    
+
+    # --- KALKULASI DURASI ---
+    use_rand_dur = st.session_state.get('chk_dur', False)
+    
+    if use_rand_dur: 
+        final_start_y = st.session_state.get('date_start', 2020)
+        final_end_y = st.session_state.get('date_end', 2020)
+    else: 
+        actual_years = loader.get_available_years(selected_loc, selected_point)
+        
+        if actual_years:
+            dur_req = st.session_state.get('rand_dur_years', 1)
+            dur_req = min(dur_req, len(actual_years)) 
+            
+            max_start_idx = len(actual_years) - dur_req
+            
+            rand_idx = random.randint(0, max_start_idx)
+            
+            final_start_y = actual_years[rand_idx]
+            final_end_y = actual_years[rand_idx + dur_req - 1]
+        else:
+            final_start_y, final_end_y = 2020, 2020
+
 
     # --- KALKULASI BEBAN ---
     all_files = loader.get_list_load_profiles()
@@ -664,12 +735,13 @@ if btn_run:
 
     auto_charge_power = math.ceil(final_p_bat * 0.4)
 
-    with st.spinner(f"Combine data {selected_loc} ({selected_point}) dari {start_y}-{end_y}..."):
+    st.toast(f"📄 Load Profile: {final_load_file}")
+    with st.spinner(f"Combining data for {selected_loc} ({selected_point}) from {final_start_y}-{final_end_y}..."):
         df_input = loader.load_and_merge_data(
             selected_loc, 
             selected_point, 
-            start_y, 
-            end_y, 
+            final_start_y, 
+            final_end_y, 
             fixed_load_file=final_load_file 
         )
         tm.sleep(0.5) 
@@ -703,11 +775,11 @@ if btn_run:
             'shoulder_price': p_shoulder
         }
         
-        with st.spinner("Calculate Energy Flow..."):
+        with st.spinner("Calculating Energy Flow..."):
             df_result = calculator.run_simulation(df_input, params)
         
         st.session_state['hasil_simulasi'] = df_result
-        st.session_state['info_simulasi'] = f"{selected_loc}_{selected_point}_{start_y}-{end_y}"
+        st.session_state['info_simulasi'] = f"{selected_loc}_{selected_point}_{final_start_y}-{final_end_y}"
         
         tariff_snapshot = {
             'is_tou': use_ToU,
@@ -743,7 +815,7 @@ if btn_run:
             'vpp_thresh': vpp_price,
             'tariff_data': tariff_snapshot,
             'location': f"{selected_loc} - {selected_point}",
-            'period': f"{start_y} to {end_y}",
+            'period': f"{final_start_y} to {final_end_y}",
             'load_source': final_load_file,
             'load_multiplier': final_load_mult 
         }

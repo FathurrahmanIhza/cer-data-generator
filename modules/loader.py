@@ -95,13 +95,14 @@ def get_master_solar_path(folder_path):
     files = sorted([f for f in os.listdir(folder_path) if f.endswith('.parquet')])
     return os.path.join(folder_path, files[0]) if files else None
 
+@st.cache_data(show_spinner=False, max_entries=10)
 def load_and_merge_data(nama_lokasi, nama_titik, start_year, end_year, fixed_load_file=None):
     path_titik = os.path.join(DATASET_DIR, nama_lokasi, nama_titik)
     path_price_dir = os.path.join(DATASET_DIR, nama_lokasi, "Price")
     
     solar_path = get_master_solar_path(path_titik)
     if not solar_path:
-        st.error("File Solar Master tidak ditemukan.")
+        st.error("Master Solar file not found.")
         return None
         
     base_irr, base_temp = load_solar_array(solar_path)
@@ -109,10 +110,9 @@ def load_and_merge_data(nama_lokasi, nama_titik, start_year, end_year, fixed_loa
     base_load, load_name = load_load_profile_array(fixed_load_file)
     
     if base_irr is None or base_load is None:
-        st.error("Gagal memuat data array Solar/Load.")
+        st.error("Failed to load Solar/Load array data.")
         return None
         
-    st.toast(f"Load Profile: {load_name}")
 
     extra_irr = base_irr[IDX_FEB_28_START:IDX_FEB_29_START]
     extra_temp = base_temp[IDX_FEB_28_START:IDX_FEB_29_START]

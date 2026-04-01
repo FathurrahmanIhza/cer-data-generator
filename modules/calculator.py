@@ -191,20 +191,23 @@ def run_simulation(df, params):
         s_start = params['t_shoulder_start'].hour
         s_end = params['t_shoulder_end'].hour
         
-        prices = [params['offpeak_price']] * 24
+        hours = df_res['timestamp'].dt.hour
         
-        def fill_prices(start, end, val, arr):
+        def get_mask(h_array, start, end):
             if start < end:
-                for h in range(start, end): arr[h] = val
-            else:
-                for h in range(start, 24): arr[h] = val
-                for h in range(0, end): arr[h] = val
-            return arr
-            
-        prices = fill_prices(s_start, s_end, params['shoulder_price'], prices)
-        prices = fill_prices(p_start, p_end, params['peak_price'], prices)
+                return (h_array >= start) & (h_array < end)
+            elif start > end:
+                return (h_array >= start) | (h_array < end)
+                return pd.Series(False, index=h_array.index)
         
-        df_res['tariff_import_AUD'] = df_res['timestamp'].dt.hour.map(lambda h: prices[h])
+        cond_peak = get_mask(hours, p_start, p_end)
+        cond_shoulder = get_mask(hours, s_start, s_end)
+        
+        df_res['tariff_import_AUD'] = np.select(
+            [cond_peak, cond_shoulder], 
+            [params['peak_price'], params['shoulder_price']], 
+            default=params['offpeak_price']
+        )
     else:
         df_res['tariff_import_AUD'] = params['import_flat']
         
