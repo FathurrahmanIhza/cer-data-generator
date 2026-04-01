@@ -43,16 +43,16 @@ def save_log_to_sheets(nim, config_name, used_params_dict):
         st.cache_data.clear()
         return True
     except Exception as e:
-        st.error(f"⚠️ Failed to Save Student Log: {e}")
+        st.error(f"⚠️ Failed To Save Student Log: {e}")
         return False
 
 def get_student_logs():
     """Mengambil riwayat log mahasiswa dari Google Sheets"""
     try:
         conn = get_gsheets_connection()
-        df = conn.read(worksheet=TAB_LOGS, ttl=180)
+        df = conn.read(worksheet=TAB_LOGS, ttl=0)
         df = df.dropna(subset=['NIM', 'Timestamp'])
         return df
     except Exception as e:
-        st.error(f"⚠️ Failed to fetch log data: {e}")
+        st.error(f"⚠️ Gagal mengambil data log: {e}")
         return pd.DataFrame()
