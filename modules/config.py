@@ -15,7 +15,6 @@ def init_default_states():
         "load_mult": 15.0,
         "chk_solar": False,
         "chk_bat": False,
-        "chk_tou": False,
         "vpp_threshold": 800,
         "sol_min": 4.0,
         "sol_max": 6.0,
@@ -28,8 +27,15 @@ def init_default_states():
         "bat_eff": 95,
         "bat_soc_init": 50,
         "bat_soc_range": (10, 90),
-        "exp_tariff": 0.08, "imp_tariff": 0.20, 
-        "pp": 0.45, "po": 0.15, "ps": 0.25
+        "tariff_scheme": "Flat",
+        "e_peak": 0.15,
+        "e_offpeak": 0.05,
+        "e_shoulder": 0.10,
+        "pp": 0.45,  
+        "po": 0.15,  
+        "ps": 0.25,  
+        "exp_tariff": 0.08, 
+        "imp_tariff": 0.20,
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -100,12 +106,15 @@ def save_config_to_sheets(config_name, current_state):
             "t_offpeak_end": time_encoder(current_state.get("t_o_end", time(6,0))),
             "t_shoulder_start": time_encoder(current_state.get("t_s_start", time(14,0))),
             "t_shoulder_end": time_encoder(current_state.get("t_s_end", time(17,0))),
+            "tariff_scheme": current_state.get("tariff_scheme", "Flat"),
             "exp_tariff": current_state.get("exp_tariff", 0.08),
-            "use_tou": current_state.get("chk_tou", False),
             "imp_tariff": current_state.get("imp_tariff", 0.20),
             "p_peak": current_state.get("pp", 0.45),
             "p_offpeak": current_state.get("po", 0.15),
-            "p_shoulder": current_state.get("ps", 0.25)
+            "p_shoulder": current_state.get("ps", 0.25),
+            "e_peak": current_state.get("e_peak", 0.15),
+            "e_offpeak": current_state.get("e_offpeak", 0.05),
+            "e_shoulder": current_state.get("e_shoulder", 0.10)
         }
         
         df_new = pd.DataFrame([new_row])
@@ -132,8 +141,9 @@ def apply_row_to_session(selected_row):
         "vpp_thresh": "vpp_threshold", "t_peak_start": "t_p_start", "t_peak_end": "t_p_end",
         "t_offpeak_start": "t_o_start", "t_offpeak_end": "t_o_end",
         "t_shoulder_start": "t_s_start", "t_shoulder_end": "t_s_end",
-        "exp_tariff": "exp_tariff", "use_tou": "chk_tou", "imp_tariff": "imp_tariff",
-        "p_peak": "pp", "p_offpeak": "po", "p_shoulder": "ps"
+        "tariff_scheme": "tariff_scheme", "exp_tariff": "exp_tariff", "imp_tariff": "imp_tariff",
+        "p_peak": "pp", "p_offpeak": "po", "p_shoulder": "ps",
+        "e_peak": "e_peak", "e_offpeak": "e_offpeak", "e_shoulder": "e_shoulder"
     }
     for db_col, widget_key in mapping.items():
         if db_col in selected_row:
@@ -158,7 +168,7 @@ def apply_row_to_session(selected_row):
                         st.session_state[widget_key] = int(float(val) * 100)
                     elif widget_key in ["vpp_threshold", "bat_eff", "date_start", "date_end", "rand_dur_years"]:
                         st.session_state[widget_key] = int(float(val))
-                    elif widget_key in ["load_mult","sol_min", "sol_max", "sol_fix", "sol_temp", "sol_pr", "bat_min", "bat_max", "bat_fix", "exp_tariff", "imp_tariff", "pp", "po", "ps"]:
+                    elif widget_key in ["load_mult","sol_min", "sol_max", "sol_fix", "sol_temp", "sol_pr", "bat_min", "bat_max", "bat_fix", "exp_tariff", "imp_tariff", "pp", "po", "ps", "e_peak", "e_offpeak", "e_shoulder"]:
                         st.session_state[widget_key] = float(val)
                     else:
                         st.session_state[widget_key] = val

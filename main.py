@@ -180,24 +180,32 @@ if st.session_state['role'] == 'admin':
                     use_rand_dur = st.toggle("Randomize / Fixed Duration", key="chk_dur")
                     
                     if use_rand_dur: 
-                        min_year, max_year = min(available_years), max(available_years)
                         y1, y2 = st.columns(2)
                         
-                        start_kwargs = {}
-                        if "date_start" not in st.session_state:
-                            start_kwargs["index"] = 0 
-                            
-                        start_y = y1.selectbox("Start Date", available_years, key="date_start", **start_kwargs)
+                        saved_start = st.session_state.get('date_start', available_years[0])
+                        idx_start = available_years.index(saved_start) if saved_start in available_years else 0
                         
-                        valid_end_years = [y for y in available_years if y >= start_y]
-                        end_kwargs = {}
+                        ui_start_y = y1.selectbox(
+                            "Start Date", 
+                            available_years, 
+                            index=idx_start, 
+                            key="ui_date_start" 
+                        )
+                        st.session_state['date_start'] = ui_start_y # 
                         
-                        if "date_end" not in st.session_state:
-                            end_kwargs["index"] = len(valid_end_years) - 1
-                        elif st.session_state["date_end"] not in valid_end_years:
-                            st.session_state["date_end"] = valid_end_years[-1]
-                            
-                        end_y = y2.selectbox("End Date", valid_end_years, key="date_end", **end_kwargs)
+                    
+                        valid_end_years = [y for y in available_years if y >= ui_start_y]
+                        
+                        saved_end = st.session_state.get('date_end', valid_end_years[-1])
+                        idx_end = valid_end_years.index(saved_end) if saved_end in valid_end_years else len(valid_end_years) - 1
+                        
+                        ui_end_y = y2.selectbox(
+                            "End Date", 
+                            valid_end_years, 
+                            index=idx_end, 
+                            key="ui_date_end" 
+                        )
+                        st.session_state['date_end'] = ui_end_y
                         
                     else: 
                         total_years = len(available_years)
@@ -258,34 +266,52 @@ if st.session_state['role'] == 'admin':
                 vpp_price = st.number_input("Dispatch Price Threshold (AUD/MWh)", 0, 2000, step=10, key="vpp_threshold")
 
                 st.info("💲 Tariff")
-                st.text("Export")
-                exp_price = st.number_input("Flat Price (AUD/kWh)", 0.0, 1.0, step=0.01, key="exp_tariff")
-
-                st.text("Import")
-                use_ToU = st.toggle("Flat / Time-Of-Use (ToU)", key="chk_tou")
+                list_scheme = ["Flat", "Time of Use", "Wholesale Price"]
+                saved_scheme = st.session_state.get('tariff_scheme', 'Flat')
+                idx_scheme = list_scheme.index(saved_scheme) if saved_scheme in list_scheme else 0
+                
+                ui_scheme = st.selectbox("Select Tariff Scheme", list_scheme, index=idx_scheme, key="tariff_scheme", label_visibility="collapsed")
                 
                 t_utils.initialize_session_state()
+
+                if ui_scheme == "Flat":
+                    st.markdown("**💲 Set Prices (AUD/kWh)**")
+                    c1, c2 = st.columns(2)
+                    p_flat = c1.number_input("Import", 0.0, 2.0, step=0.01, key="imp_tariff")
+                    exp_price = c2.number_input("Export", 0.0, 1.0, step=0.01, key="exp_tariff")
                 
-                if use_ToU:
+                elif ui_scheme == "Time of Use":
+                    st.markdown("**🕒 Set Time Periods**")
                     st.markdown("Peak Time")
-                    c1, c2, c3 = st.columns([1, 1, 1])
+                    c1, c2 = st.columns(2)
                     c1.time_input("Start", key="t_p_start", on_change=t_utils.sync_peak_start)
                     c2.time_input("End", key="t_p_end", on_change=t_utils.sync_peak_end)
-                    p_peak = c3.number_input("Price (AUD/kWh)", 0.0, 2.0, step=0.01, key="pp")
 
-                    st.markdown("Off-Peak")
-                    c1, c2, c3 = st.columns([1, 1, 1])
+                    st.markdown("Off-Peak Time")
+                    c1, c2 = st.columns(2)
                     c1.time_input("Start", key="t_o_start", on_change=t_utils.sync_offpeak_start, label_visibility="collapsed")
                     c2.time_input("End", key="t_o_end", on_change=t_utils.sync_offpeak_end, label_visibility="collapsed")
-                    p_offpeak = c3.number_input("Price (AUD/kWh)", 0.0, 2.0, step=0.01, label_visibility="collapsed", key="po")
 
                     st.markdown("Shoulder Time")
-                    c1, c2, c3 = st.columns([1, 1, 1])
+                    c1, c2 = st.columns(2)
                     c1.time_input("Start", key="t_s_start", on_change=t_utils.sync_shoulder_start, label_visibility="collapsed")
                     c2.time_input("End", key="t_s_end", on_change=t_utils.sync_shoulder_end, label_visibility="collapsed")
-                    p_shoulder = c3.number_input("Price (AUD/kWh)", 0.0, 2.0, step=0.01, label_visibility="collapsed", key="ps")
-                else:
-                    p_flat = st.number_input("Flat Price (AUD/kWh)", 0.0, 2.0, step=0.01, key="imp_tariff")
+
+                    st.markdown("**💲 Set Prices (AUD/kWh)**")
+                    cp1, cp2 = st.columns(2)
+                    with cp1:
+                        st.markdown("Import")
+                        p_peak = st.number_input("Peak", 0.0, 2.0, step=0.01, key="pp")
+                        p_offpeak = st.number_input("Off-Peak", 0.0, 2.0, step=0.01, key="po")
+                        p_shoulder = st.number_input("Shoulder", 0.0, 2.0, step=0.01, key="ps")
+                    with cp2:
+                        st.markdown("Export")
+                        e_peak = st.number_input("Peak", 0.0, 2.0, step=0.01, key="e_peak")
+                        e_offpeak = st.number_input("Off-Peak", 0.0, 2.0, step=0.01, key="e_offpeak")
+                        e_shoulder = st.number_input("Shoulder", 0.0, 2.0, step=0.01, key="e_shoulder")
+
+                elif ui_scheme == "Wholesale Price":
+                    st.info("- **Import:** Spot Price + Market + Network + Other Fees\n- **Export:** Spot Price + Market Fees")
 
         with col_spec:
             st.subheader("⚙️ System Specifications")
@@ -430,6 +456,7 @@ if st.session_state['role'] == 'admin':
                                 col_load_regen = 'load_profile' if 'load_profile' in df_input_regen.columns else 'beban_rumah_kw'
                                 df_input_regen[col_load_regen] = df_input_regen[col_load_regen] * saved_params['load_multiplier']
 
+                                # Di dalam btn_regen_tracker
                                 sim_params = {
                                     'solar_capacity_kw': saved_params['solar'], 
                                     'temp_coeff': saved_params['solar_temp'],
@@ -441,27 +468,32 @@ if st.session_state['role'] == 'admin':
                                     'max_discharge_kw': saved_params['bat_discharge_kw'],
                                     'soc_min_pct': saved_params['soc_min'],
                                     'soc_max_pct': saved_params['soc_max'],
-                                    'dispatch_price_threshold': saved_params['vpp_thresh'], 
-                                    'is_tou': saved_params['tariff_data']['is_tou'],
-                                    'export_price': saved_params['tariff_data']['export_price'],
+                                    'dispatch_price_threshold': saved_params['vpp_thresh'],
+                                    'df_wholesale_fees': loader.get_wholesale_fees(selected_loc), 
                                 }
                                 
                                 t_data = saved_params['tariff_data']
-                                if t_data['is_tou']:
+                                sim_params['tariff_scheme'] = t_data['tariff_scheme']
+                                    
+                                if sim_params['tariff_scheme'] == "Time of Use":
                                     from datetime import datetime as dt
                                     sim_params.update({
                                         'peak_price': t_data['peak_price'],
+                                        'exp_peak': t_data['exp_peak'],
                                         't_peak_start': dt.strptime(t_data['peak_start'], "%H:%M").time(),
                                         't_peak_end': dt.strptime(t_data['peak_end'], "%H:%M").time(),
                                         'offpeak_price': t_data['offpeak_price'],
+                                        'exp_offpeak': t_data['exp_offpeak'],
                                         't_offpeak_start': dt.strptime(t_data['offpeak_start'], "%H:%M").time(),
                                         't_offpeak_end': dt.strptime(t_data['offpeak_end'], "%H:%M").time(),
                                         'shoulder_price': t_data['shoulder_price'],
+                                        'exp_shoulder': t_data['exp_shoulder'],
                                         't_shoulder_start': dt.strptime(t_data['shoulder_start'], "%H:%M").time(),
                                         't_shoulder_end': dt.strptime(t_data['shoulder_end'], "%H:%M").time(),
                                     })
-                                else:
+                                elif sim_params['tariff_scheme'] == "Flat":
                                     sim_params['import_flat'] = t_data['import_flat']
+                                    sim_params['export_price'] = t_data['export_price']
                                     
                                 df_result_regen = calculator.run_simulation(df_input_regen, sim_params)
                                 
@@ -524,21 +556,25 @@ if st.session_state['role'] == 'admin':
                         """)
 
                 with st.expander("💲 View Applied Tariff Details", expanded=False):
-                    tc1, tc2 = st.columns(2)
-                    with tc1:
-                        st.markdown(f"**Export Tariff:**")
-                        st.markdown(f"⚡ Flat Rate: **{t_data['export_price']} AUD/kWh**")
-                    with tc2:
-                        st.markdown(f"**Import Tariff:**")
-                        if t_data['is_tou']:
-                            st.markdown("🕒 **Time-of-Use (ToU) Profile:**")
-                            st.markdown(f"""
-                            - **Peak:** {t_data['peak_price']} AUD <br> &nbsp;&nbsp;&nbsp; *({t_data['peak_start']} - {t_data['peak_end']})*
-                            - **Shoulder:** {t_data['shoulder_price']} AUD <br> &nbsp;&nbsp;&nbsp; *({t_data['shoulder_start']} - {t_data['shoulder_end']})*
-                            - **Off-Peak:** {t_data['offpeak_price']} AUD <br> &nbsp;&nbsp;&nbsp; *({t_data['offpeak_start']} - {t_data['offpeak_end']})*
-                            """, unsafe_allow_html=True)
-                        else:
-                            st.markdown(f"🟦 Flat Rate: **{t_data['import_flat']} AUD/kWh**")
+                    schema_name = t_data.get('tariff_scheme', "Flat")
+                    st.markdown(f"**⚡ Scheme:** `{schema_name}`")
+                    
+                    if schema_name == "Wholesale Price":
+                        st.markdown("- **Import:** Spot Price + Market + Network + Other Fees\n- **Export:** Spot Price + Market Fees")
+                    else:
+                        tc1, tc2 = st.columns(2)
+                        with tc1:
+                            st.markdown(f"**Export Tariff:**")
+                            if schema_name == "Time of Use":
+                                st.markdown(f"- Peak: **{t_data.get('exp_peak', 0.15)} AUD**\n- Shoulder: **{t_data.get('exp_shoulder', 0.10)} AUD**\n- Off-Peak: **{t_data.get('exp_offpeak', 0.05)} AUD**")
+                            else:
+                                st.markdown(f"Flat Rate: **{t_data.get('export_price', 0.08)} AUD/kWh**")
+                        with tc2:
+                            st.markdown(f"**Import Tariff:**")
+                            if schema_name == "Time of Use":
+                                st.markdown(f"- Peak: **{t_data.get('peak_price', 0.45)} AUD**\n- Shoulder: **{t_data.get('shoulder_price', 0.25)} AUD**\n- Off-Peak: **{t_data.get('offpeak_price', 0.15)} AUD**")
+                            else:
+                                st.markdown(f"Flat Rate: **{t_data.get('import_flat', 0.20)} AUD/kWh**")
                 
                 st.markdown("### 💾 Export Data")
                 st.download_button(
@@ -610,12 +646,15 @@ if btn_run:
     p_max_soc = range_soc[1] / 100
 
     vpp_price = st.session_state.get('vpp_threshold', 800)
+    tariff_scheme = st.session_state.get('tariff_scheme', 'Flat')
     exp_price = st.session_state.get('exp_tariff', 0.08)
-    use_ToU = st.session_state.get('chk_tou', False)
+    p_flat = st.session_state.get('imp_tariff', 0.20)
     p_peak = st.session_state.get('pp', 0.45)
     p_offpeak = st.session_state.get('po', 0.15)
     p_shoulder = st.session_state.get('ps', 0.25)
-    p_flat = st.session_state.get('imp_tariff', 0.20)
+    e_peak = st.session_state.get('e_peak', 0.15)
+    e_offpeak = st.session_state.get('e_offpeak', 0.05)
+    e_shoulder = st.session_state.get('e_shoulder', 0.10)
 
     selected_load_file = st.session_state.get('sel_load_file', None)
     # start_y = st.session_state.get('date_start', 2020)
@@ -767,12 +806,16 @@ if btn_run:
             't_peak_end': st.session_state.get('t_p_end', time(20,0)),
             't_shoulder_start': st.session_state.get('t_s_start', time(14,0)),
             't_shoulder_end': st.session_state.get('t_s_end', time(17,0)),
-            'is_tou': use_ToU,
+            'tariff_scheme': tariff_scheme,
+            'df_wholesale_fees': loader.get_wholesale_fees(selected_loc),
             'export_price': exp_price,
             'import_flat': p_flat,
             'peak_price': p_peak,
             'offpeak_price': p_offpeak,
-            'shoulder_price': p_shoulder
+            'shoulder_price': p_shoulder,
+            'exp_peak': e_peak,
+            'exp_offpeak': e_offpeak,
+            'exp_shoulder': e_shoulder
         }
         
         with st.spinner("Calculating Energy Flow..."):
@@ -781,25 +824,24 @@ if btn_run:
         st.session_state['hasil_simulasi'] = df_result
         st.session_state['info_simulasi'] = f"{selected_loc}_{selected_point}_{final_start_y}-{final_end_y}"
         
-        tariff_snapshot = {
-            'is_tou': use_ToU,
-            'export_price': exp_price
-        }
+        # Susun Snapshot Tarif
+        tariff_snapshot = {'tariff_scheme': tariff_scheme}
         
-        if use_ToU:
+        if tariff_scheme == "Time of Use":
             tariff_snapshot.update({
-                'peak_price': p_peak,
+                'peak_price': p_peak, 'exp_peak': e_peak,
                 'peak_start': st.session_state.get('t_p_start', time(17,0)).strftime("%H:%M"),
                 'peak_end': st.session_state.get('t_p_end', time(20,0)).strftime("%H:%M"),
-                'offpeak_price': p_offpeak,
+                'offpeak_price': p_offpeak, 'exp_offpeak': e_offpeak,
                 'offpeak_start': st.session_state.get('t_o_start', time(22,0)).strftime("%H:%M"),
                 'offpeak_end': st.session_state.get('t_o_end', time(6,0)).strftime("%H:%M"),
-                'shoulder_price': p_shoulder,
+                'shoulder_price': p_shoulder, 'exp_shoulder': e_shoulder,
                 'shoulder_start': st.session_state.get('t_s_start', time(14,0)).strftime("%H:%M"),
                 'shoulder_end': st.session_state.get('t_s_end', time(17,0)).strftime("%H:%M"),
             })
-        else:
+        elif tariff_scheme == "Flat":
             tariff_snapshot['import_flat'] = p_flat
+            tariff_snapshot['export_price'] = exp_price
 
         st.session_state['used_params'] = {
             'solar': final_p_solar,
@@ -879,26 +921,29 @@ if st.session_state['hasil_simulasi'] is not None:
                     """)
         if st.session_state.get('role', 'student') == 'admin':
             with st.expander("💲 View Applied Tariff Details", expanded=False):
-                tc1, tc2 = st.columns(2)
-                with tc1:
-                    st.markdown(f"**Export Tariff:**")
-                    st.markdown(f"⚡ Flat Rate: **{t_data['export_price']} AUD/kWh**")
-                with tc2:
-                    st.markdown(f"**Import Tariff:**")
-                    if t_data['is_tou']:
-                        st.markdown("🕒 **Time-of-Use (ToU) Profile:**")
-                        st.markdown(f"""
-                        - **Peak:** {t_data['peak_price']} AUD <br> &nbsp;&nbsp;&nbsp; *({t_data['peak_start']} - {t_data['peak_end']})*
-                        - **Shoulder:** {t_data['shoulder_price']} AUD <br> &nbsp;&nbsp;&nbsp; *({t_data['shoulder_start']} - {t_data['shoulder_end']})*
-                        - **Off-Peak:** {t_data['offpeak_price']} AUD <br> &nbsp;&nbsp;&nbsp; *({t_data['offpeak_start']} - {t_data['offpeak_end']})*
-                        """, unsafe_allow_html=True)
+                    schema_name = t_data.get('tariff_scheme', "Time of Use" if t_data.get('is_tou') else "Flat")
+                    st.markdown(f"**Scheme:** `{schema_name}`")
+                    
+                    if schema_name == "Wholesale Price":
+                        st.markdown("- **Import:** Spot Price + Market + Network + Other Fees\n- **Export:** Spot Price + Market Fees")
                     else:
-                        st.markdown(f"🟦 Flat Rate: **{t_data['import_flat']} AUD/kWh**")
+                        tc1, tc2 = st.columns(2)
+                        with tc1:
+                            st.markdown(f"**Export Tariff:**")
+                            if schema_name == "Time of Use":
+                                st.markdown(f"- Peak: **{t_data.get('exp_peak', 0.15)} AUD**\n- Shoulder: **{t_data.get('exp_shoulder', 0.10)} AUD**\n- Off-Peak: **{t_data.get('exp_offpeak', 0.05)} AUD**")
+                            else:
+                                st.markdown(f"Flat Rate: **{t_data.get('export_price', 0.08)} AUD/kWh**")
+                        with tc2:
+                            st.markdown(f"**Import Tariff:**")
+                            if schema_name == "Time of Use":
+                                st.markdown(f"- Peak: **{t_data['peak_price']} AUD**\n- Shoulder: **{t_data['shoulder_price']} AUD**\n- Off-Peak: **{t_data['offpeak_price']} AUD**")
+                            else:
+                                st.markdown(f"Flat Rate: **{t_data.get('import_flat', 0.20)} AUD/kWh**")
 
         st.markdown("### 💾 Export Data")
         
         df_export = df_result.copy()
-        df_export = df_export.round(2)
 
         output_columns = [
             'timestamp',
@@ -921,8 +966,10 @@ if st.session_state['hasil_simulasi'] is not None:
             'irradiance': 'irradiance_Wh/m^2',
             'temperature': 'temperature_C',
             'load_profile': 'load_kW',
-            'price_profile': 'price_AUD',
-            'battery_soc_pct': 'battery_soc_%'
+            'price_profile': 'price_AUD/mWh',
+            'battery_soc_pct': 'battery_soc_%',
+            'tariff_import_AUD': 'tariff_import_AUD/kWh',
+            'tariff_export_AUD': 'tariff_export_AUD/kWh'
         })
         
         csv = df_export.to_csv(index=False).encode('utf-8')

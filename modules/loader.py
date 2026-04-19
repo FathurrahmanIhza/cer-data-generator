@@ -95,6 +95,14 @@ def get_master_solar_path(folder_path):
     files = sorted([f for f in os.listdir(folder_path) if f.endswith('.parquet')])
     return os.path.join(folder_path, files[0]) if files else None
 
+@st.cache_data(show_spinner=False)
+def get_wholesale_fees(region_name):
+    file_path = os.path.join(DATASET_DIR, "wholesale_fees.csv")
+    if os.path.exists(file_path):
+        df_fees = pd.read_csv(file_path)
+        return df_fees[df_fees['Region'] == region_name]
+    return pd.DataFrame()
+
 @st.cache_data(show_spinner=False, max_entries=10)
 def load_and_merge_data(nama_lokasi, nama_titik, start_year, end_year, fixed_load_file=None):
     path_titik = os.path.join(DATASET_DIR, nama_lokasi, nama_titik)
