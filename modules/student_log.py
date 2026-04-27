@@ -3,12 +3,9 @@ import pandas as pd
 import json
 import zlib
 from datetime import datetime
-from streamlit_gsheets import GSheetsConnection
+from modules.config import supabase
 
-TAB_LOGS = "Student_Logs"
-
-def get_gsheets_connection():
-    return st.connection("gsheets", type=GSheetsConnection)
+TAB_LOGS = "student_logs"
 
 def generate_seed(nim, config_name=""):
     """
@@ -22,37 +19,41 @@ def generate_seed(nim, config_name=""):
     return zlib.crc32(gabungan.encode('utf-8'))
 
 def save_log_to_sheets(nim, config_name, used_params_dict):
-    """Menyimpan riwayat generate siswa ke database (Metadata JSON)"""
+    """
+    Sekarang menyimpan ke Supabase. 
+    Nama fungsi tetap sama agar tidak perlu banyak mengubah main.py, 
+    tapi logic di dalamnya sudah beralih ke Supabase.
+    """
     try:
-        conn = get_gsheets_connection()
-        df_existing = conn.read(worksheet=TAB_LOGS, ttl=0)
-        
-        json_snapshot = json.dumps(used_params_dict)
-        
         new_row = {
             "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "NIM": str(nim).strip().upper(),
             "Config_Name": config_name,
-            "Parameter_Snapshot": json_snapshot
+            "Parameter_Snapshot": used_params_dict 
         }
         
-        df_new = pd.DataFrame([new_row])
-        df_updated = pd.concat([df_existing, df_new], ignore_index=True)
-        conn.update(worksheet=TAB_LOGS, data=df_updated)
+        supabase.table(TAB_LOGS).insert(new_row).execute()
         
         st.cache_data.clear()
         return True
     except Exception as e:
-        st.error(f"⚠️ Failed to Save Student Log: {e}")
+        st.error(f"⚠️ Gagal menyimpan Log Mahasiswa ke Supabase: {e}")
         return False
 
+@st.cache_data(ttl=60)
 def get_student_logs():
-    """Mengambil riwayat log mahasiswa dari Google Sheets"""
+    """Mengambil riwayat log mahasiswa dari Supabase"""
     try:
-        conn = get_gsheets_connection()
-        df = conn.read(worksheet=TAB_LOGS, ttl=60)
-        df = df.dropna(subset=['NIM', 'Timestamp'])
+        response = supabase.table(TAB_LOGS).select("*").execute()
+        df = pd.DataFrame(response.data)
+        
+        if not df.empty:
+            df = df.dropna(subset=['NIM', 'Timestamp'])
+
+            df['Parameter_Snapshot'] = df['Parameter_Snapshot'].apply(
+                lambda x: json.dumps(x) if isinstance(x, dict) else x
+            )
         return df
     except Exception as e:
-        st.error(f"⚠️ Failed to fetch log data: {e}")
+        st.error(f"⚠️ Gagal mengambil data log dari Supabase: {e}")
         return pd.DataFrame()

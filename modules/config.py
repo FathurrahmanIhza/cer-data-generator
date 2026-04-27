@@ -1,9 +1,17 @@
 import streamlit as st
 import pandas as pd
 from datetime import time, datetime
-from streamlit_gsheets import GSheetsConnection
+from supabase import create_client, Client
 
-TAB_CONFIG = "Config_History"
+TAB_CONFIG = "config_history"
+
+@st.cache_resource
+def init_connection():
+    url = st.secrets["SUPABASE_URL"]
+    key = st.secrets["SUPABASE_KEY"]
+    return create_client(url, key)
+
+supabase = init_connection()
 
 def init_default_states():
     """Mengisi nilai default ke dalam memori agar widget tidak bentrok (tanpa warning)"""
@@ -47,31 +55,24 @@ def time_encoder(obj):
         return obj.strftime("%H:%M")
     raise TypeError("Type not serializable")
 
-def get_gsheets_connection():
-    return st.connection("gsheets", type=GSheetsConnection)
-
 def load_config_history():
     try:
-        conn = get_gsheets_connection()
-        df_history = conn.read(worksheet=TAB_CONFIG, ttl=30) 
-        if df_history is None or df_history.empty:
-            return pd.DataFrame()
-        if 'Config_Name' not in df_history.columns:
-            return pd.DataFrame()
-        df_history = df_history.dropna(subset=['Config_Name'])
-        df_history = df_history[df_history['Config_Name'].astype(str).str.strip() != '']
         
-        return df_history.tail(10).iloc[::-1]
+        response = supabase.table(TAB_CONFIG)\
+            .select("*")\
+            .neq("Config_Name", "")\
+            .order("id", desc=True)\
+            .limit(10)\
+            .execute()
+            
+        df_history = pd.DataFrame(response.data)
+        return df_history
     except Exception as e:
-        st.error(f"⚠️ Failed to Read Config History: {e}")
+        st.error(f"⚠️ Failed to Read Config History from Supabase: {e}")
         return pd.DataFrame()
 
 def save_config_to_sheets(config_name, current_state):
     try:
-        conn = get_gsheets_connection()
-        df_existing = conn.read(worksheet=TAB_CONFIG, ttl=0)
-        df_existing = df_existing.dropna(subset=['Config_Name'])
-        
         new_row = {
             "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "Config_Name": config_name,
@@ -117,9 +118,8 @@ def save_config_to_sheets(config_name, current_state):
             "e_shoulder": current_state.get("e_shoulder", 0.10)
         }
         
-        df_new = pd.DataFrame([new_row])
-        df_updated = pd.concat([df_existing, df_new], ignore_index=True)
-        conn.update(worksheet=TAB_CONFIG, data=df_updated)
+        # Eksekusi Insert (Sangat Cepat & Ramping!)
+        supabase.table(TAB_CONFIG).insert(new_row).execute()
         
         st.cache_data.clear()
         return True

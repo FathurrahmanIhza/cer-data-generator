@@ -108,7 +108,7 @@ if st.session_state['role'] == 'admin':
             if new_config_name.strip() == "":
                 st.warning("⚠️ Empty Config Name")
             else:
-                with st.spinner("Saving to Google Sheets..."):
+                with st.spinner("Saving to Database..."):
                     success = cfg.save_config_to_sheets(new_config_name, st.session_state)
                     if success:
                         st.session_state['active_config'] = new_config_name
@@ -377,7 +377,7 @@ if st.session_state['role'] == 'admin':
             
             def extract_summary(json_str):
                 try:
-                    p = json.loads(json_str)
+                    p = json.loads(json_str) 
                     return f"Loc: {p.get('location','')} | PV: {p.get('solar','')}kWp | Bat: {p.get('bat','')}kWh | Load: {p.get('load_source','')}"
                 except:
                     return "Invalid Data"
@@ -387,6 +387,8 @@ if st.session_state['role'] == 'admin':
             gb = GridOptionsBuilder.from_dataframe(df_logs)
             
             gb.configure_column("Parameter_Snapshot", hide=True)
+            gb.configure_column("id", hide=True)
+            gb.configure_column("created_at", hide=True)
             
             gb.configure_default_column(resizable=True, filterable=True, sortable=True)
             
@@ -469,31 +471,39 @@ if st.session_state['role'] == 'admin':
                                     'soc_min_pct': saved_params['soc_min'],
                                     'soc_max_pct': saved_params['soc_max'],
                                     'dispatch_price_threshold': saved_params['vpp_thresh'],
-                                    'df_wholesale_fees': loader.get_wholesale_fees(selected_loc), 
+                                    'df_wholesale_fees': loader.get_wholesale_fees(reg), 
                                 }
                                 
                                 t_data = saved_params['tariff_data']
-                                sim_params['tariff_scheme'] = t_data['tariff_scheme']
-                                    
+                                sim_params['tariff_scheme'] = t_data.get('tariff_scheme', 'Flat')
+
+                                sim_params.update({
+                                    't_peak_start': time(17, 0),
+                                    't_peak_end': time(20, 0),
+                                    't_offpeak_start': time(22, 0),
+                                    't_offpeak_end': time(6, 0),
+                                    't_shoulder_start': time(14, 0),
+                                    't_shoulder_end': time(17, 0)
+                                })
+
                                 if sim_params['tariff_scheme'] == "Time of Use":
-                                    from datetime import datetime as dt
                                     sim_params.update({
                                         'peak_price': t_data['peak_price'],
                                         'exp_peak': t_data['exp_peak'],
-                                        't_peak_start': dt.strptime(t_data['peak_start'], "%H:%M").time(),
-                                        't_peak_end': dt.strptime(t_data['peak_end'], "%H:%M").time(),
+                                        't_peak_start': datetime.strptime(t_data['peak_start'], "%H:%M").time(),
+                                        't_peak_end': datetime.strptime(t_data['peak_end'], "%H:%M").time(),
                                         'offpeak_price': t_data['offpeak_price'],
                                         'exp_offpeak': t_data['exp_offpeak'],
-                                        't_offpeak_start': dt.strptime(t_data['offpeak_start'], "%H:%M").time(),
-                                        't_offpeak_end': dt.strptime(t_data['offpeak_end'], "%H:%M").time(),
+                                        't_offpeak_start': datetime.strptime(t_data['offpeak_start'], "%H:%M").time(),
+                                        't_offpeak_end': datetime.strptime(t_data['offpeak_end'], "%H:%M").time(),
                                         'shoulder_price': t_data['shoulder_price'],
                                         'exp_shoulder': t_data['exp_shoulder'],
-                                        't_shoulder_start': dt.strptime(t_data['shoulder_start'], "%H:%M").time(),
-                                        't_shoulder_end': dt.strptime(t_data['shoulder_end'], "%H:%M").time(),
+                                        't_shoulder_start': datetime.strptime(t_data['shoulder_start'], "%H:%M").time(),
+                                        't_shoulder_end': datetime.strptime(t_data['shoulder_end'], "%H:%M").time(),
                                     })
                                 elif sim_params['tariff_scheme'] == "Flat":
-                                    sim_params['import_flat'] = t_data['import_flat']
-                                    sim_params['export_price'] = t_data['export_price']
+                                    sim_params['import_flat'] = t_data.get('import_flat', 0.20)
+                                    sim_params['export_price'] = t_data.get('export_price', 0.08)
                                     
                                 df_result_regen = calculator.run_simulation(df_input_regen, sim_params)
                                 
