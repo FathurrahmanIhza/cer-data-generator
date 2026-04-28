@@ -209,7 +209,7 @@ def run_simulation(df, params):
             o_fee = fy_str.map(o_map).fillna(0).values
             
             df_res['tariff_import_AUD'] = spot_kwh + m_fee + n_fee + o_fee
-            df_res['tariff_export_AUD'] = np.maximum(0, spot_kwh + m_fee)
+            df_res['tariff_export_AUD'] = spot_kwh + m_fee
             
         else:
             df_res['tariff_import_AUD'] = 0.0

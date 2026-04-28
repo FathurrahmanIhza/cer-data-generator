@@ -266,52 +266,103 @@ if st.session_state['role'] == 'admin':
                 vpp_price = st.number_input("Dispatch Price Threshold (AUD/MWh)", 0, 2000, step=10, key="vpp_threshold")
 
                 st.info("💲 Tariff")
-                list_scheme = ["Flat", "Time of Use", "Wholesale Price"]
-                saved_scheme = st.session_state.get('tariff_scheme', 'Flat')
-                idx_scheme = list_scheme.index(saved_scheme) if saved_scheme in list_scheme else 0
+                list_scheme = ["Flat", "Time of Use", "Wholesale Price", "Random"]
                 
-                ui_scheme = st.selectbox("Select Tariff Scheme", list_scheme, index=idx_scheme, key="tariff_scheme", label_visibility="collapsed")
+                def _sync_scheme():
+                    st.session_state['tariff_scheme'] = st.session_state['ui_tariff_scheme']
+
+                saved_scheme = st.session_state.get('tariff_scheme', 'Flat')
+                if saved_scheme not in list_scheme: 
+                    saved_scheme = 'Flat'
+                
+                if "ui_tariff_scheme" not in st.session_state:
+                    st.session_state["ui_tariff_scheme"] = saved_scheme
+                
+                ui_scheme = st.selectbox(
+                    "Select Tariff Scheme", 
+                    list_scheme, 
+                    key="ui_tariff_scheme", 
+                    on_change=_sync_scheme,
+                    label_visibility="collapsed"
+                )
                 
                 t_utils.initialize_session_state()
 
                 if ui_scheme == "Flat":
                     st.markdown("**💲 Set Prices (AUD/kWh)**")
                     c1, c2 = st.columns(2)
-                    p_flat = c1.number_input("Import", 0.0, 2.0, step=0.01, key="imp_tariff")
-                    exp_price = c2.number_input("Export", 0.0, 1.0, step=0.01, key="exp_tariff")
+                    
+                    def _sync_flat_imp(): st.session_state['imp_tariff'] = st.session_state['ui_imp_tariff']
+                    def _sync_flat_exp(): st.session_state['exp_tariff'] = st.session_state['ui_exp_tariff']
+                    
+                    c1.number_input("Import", 0.0, 2.0, step=0.01, key="ui_imp_tariff", 
+                                    value=float(st.session_state.get('imp_tariff', 0.20)), on_change=_sync_flat_imp)
+                    c2.number_input("Export", 0.0, 1.0, step=0.01, key="ui_exp_tariff", 
+                                    value=float(st.session_state.get('exp_tariff', 0.08)), on_change=_sync_flat_exp)
                 
                 elif ui_scheme == "Time of Use":
                     st.markdown("**🕒 Set Time Periods**")
+                    
+                    def _sync_t_p_start():
+                        st.session_state['t_p_start'] = st.session_state['ui_t_p_start']
+                        t_utils.sync_peak_start()
+                    def _sync_t_p_end():
+                        st.session_state['t_p_end'] = st.session_state['ui_t_p_end']
+                        t_utils.sync_peak_end()
+                    def _sync_t_o_start():
+                        st.session_state['t_o_start'] = st.session_state['ui_t_o_start']
+                        t_utils.sync_offpeak_start()
+                    def _sync_t_o_end():
+                        st.session_state['t_o_end'] = st.session_state['ui_t_o_end']
+                        t_utils.sync_offpeak_end()
+                    def _sync_t_s_start():
+                        st.session_state['t_s_start'] = st.session_state['ui_t_s_start']
+                        t_utils.sync_shoulder_start()
+                    def _sync_t_s_end():
+                        st.session_state['t_s_end'] = st.session_state['ui_t_s_end']
+                        t_utils.sync_shoulder_end()
+                    
                     st.markdown("Peak Time")
                     c1, c2 = st.columns(2)
-                    c1.time_input("Start", key="t_p_start", on_change=t_utils.sync_peak_start)
-                    c2.time_input("End", key="t_p_end", on_change=t_utils.sync_peak_end)
+                    c1.time_input("Start", key="ui_t_p_start", value=st.session_state.get('t_p_start', time(19,0)), on_change=_sync_t_p_start)
+                    c2.time_input("End", key="ui_t_p_end", value=st.session_state.get('t_p_end', time(23,0)), on_change=_sync_t_p_end)
 
                     st.markdown("Off-Peak Time")
                     c1, c2 = st.columns(2)
-                    c1.time_input("Start", key="t_o_start", on_change=t_utils.sync_offpeak_start, label_visibility="collapsed")
-                    c2.time_input("End", key="t_o_end", on_change=t_utils.sync_offpeak_end, label_visibility="collapsed")
+                    c1.time_input("Start", key="ui_t_o_start", value=st.session_state.get('t_o_start', time(23,0)), on_change=_sync_t_o_start, label_visibility="collapsed")
+                    c2.time_input("End", key="ui_t_o_end", value=st.session_state.get('t_o_end', time(7,0)), on_change=_sync_t_o_end, label_visibility="collapsed")
 
                     st.markdown("Shoulder Time")
                     c1, c2 = st.columns(2)
-                    c1.time_input("Start", key="t_s_start", on_change=t_utils.sync_shoulder_start, label_visibility="collapsed")
-                    c2.time_input("End", key="t_s_end", on_change=t_utils.sync_shoulder_end, label_visibility="collapsed")
+                    c1.time_input("Start", key="ui_t_s_start", value=st.session_state.get('t_s_start', time(7,0)), on_change=_sync_t_s_start, label_visibility="collapsed")
+                    c2.time_input("End", key="ui_t_s_end", value=st.session_state.get('t_s_end', time(19,0)), on_change=_sync_t_s_end, label_visibility="collapsed")
 
                     st.markdown("**💲 Set Prices (AUD/kWh)**")
                     cp1, cp2 = st.columns(2)
+                    
+                    def _sync_pp(): st.session_state['pp'] = st.session_state['ui_pp']
+                    def _sync_po(): st.session_state['po'] = st.session_state['ui_po']
+                    def _sync_ps(): st.session_state['ps'] = st.session_state['ui_ps']
+                    def _sync_ep(): st.session_state['e_peak'] = st.session_state['ui_e_peak']
+                    def _sync_eo(): st.session_state['e_offpeak'] = st.session_state['ui_e_offpeak']
+                    def _sync_es(): st.session_state['e_shoulder'] = st.session_state['ui_e_shoulder']
+                    
                     with cp1:
                         st.markdown("Import")
-                        p_peak = st.number_input("Peak", 0.0, 2.0, step=0.01, key="pp")
-                        p_offpeak = st.number_input("Off-Peak", 0.0, 2.0, step=0.01, key="po")
-                        p_shoulder = st.number_input("Shoulder", 0.0, 2.0, step=0.01, key="ps")
+                        st.number_input("Peak", 0.0, 2.0, step=0.01, key="ui_pp", value=float(st.session_state.get('pp', 0.45)), on_change=_sync_pp)
+                        st.number_input("Off-Peak", 0.0, 2.0, step=0.01, key="ui_po", value=float(st.session_state.get('po', 0.15)), on_change=_sync_po)
+                        st.number_input("Shoulder", 0.0, 2.0, step=0.01, key="ui_ps", value=float(st.session_state.get('ps', 0.25)), on_change=_sync_ps)
                     with cp2:
                         st.markdown("Export")
-                        e_peak = st.number_input("Peak", 0.0, 2.0, step=0.01, key="e_peak")
-                        e_offpeak = st.number_input("Off-Peak", 0.0, 2.0, step=0.01, key="e_offpeak")
-                        e_shoulder = st.number_input("Shoulder", 0.0, 2.0, step=0.01, key="e_shoulder")
+                        st.number_input("Peak", 0.0, 2.0, step=0.01, key="ui_e_peak", value=float(st.session_state.get('e_peak', 0.15)), on_change=_sync_ep)
+                        st.number_input("Off-Peak", 0.0, 2.0, step=0.01, key="ui_e_offpeak", value=float(st.session_state.get('e_offpeak', 0.05)), on_change=_sync_eo)
+                        st.number_input("Shoulder", 0.0, 2.0, step=0.01, key="ui_e_shoulder", value=float(st.session_state.get('e_shoulder', 0.10)), on_change=_sync_es)
 
                 elif ui_scheme == "Wholesale Price":
                     st.info("- **Import:** Spot Price + Market + Network + Other Fees\n- **Export:** Spot Price + Market Fees")
+                
+                elif ui_scheme == "Random":
+                    st.info("The simulation will randomly select between Flat, Time of Use, or Wholesale Price.\n")
 
         with col_spec:
             st.subheader("⚙️ System Specifications")
@@ -444,9 +495,9 @@ if st.session_state['role'] == 'admin':
                             reg = loc_split[0].strip()
                             pt = " - ".join(loc_split[1:]).strip() 
                             
-                            yr_split = saved_params['period'].split(" to ")
+                            yr_split = str(saved_params['period']).split(" to ")
                             sy = int(yr_split[0])
-                            ey = int(yr_split[1])
+                            ey = int(yr_split[1]) if len(yr_split) > 1 else sy
                             
                             df_input_regen = loader.load_and_merge_data(
                                 reg, pt, sy, ey, fixed_load_file=saved_params['load_source']
@@ -657,6 +708,8 @@ if btn_run:
 
     vpp_price = st.session_state.get('vpp_threshold', 800)
     tariff_scheme = st.session_state.get('tariff_scheme', 'Flat')
+    if tariff_scheme == "Random":
+        tariff_scheme = random.choice(["Flat", "Time of Use", "Wholesale Price"])
     exp_price = st.session_state.get('exp_tariff', 0.08)
     p_flat = st.session_state.get('imp_tariff', 0.20)
     p_peak = st.session_state.get('pp', 0.45)
@@ -782,7 +835,21 @@ if btn_run:
     else:
         final_p_bat = p_bat_fix
 
-    auto_charge_power = math.ceil(final_p_bat * 0.4)
+    bat_total_range = p_bat_max - p_bat_min
+    
+    if bat_total_range <= 0:
+        bat_segment_idx = 2 
+    else:
+        bat_segment_width = bat_total_range / 5
+        bat_segment_idx = int((final_p_bat - p_bat_min) / bat_segment_width)
+        bat_segment_idx = max(0, min(4, bat_segment_idx))
+
+    if bat_segment_idx == 0:
+        auto_charge_power = 5.0
+    elif bat_segment_idx in [1, 2]:
+        auto_charge_power = 10.0
+    else:
+        auto_charge_power = 15.0
 
     st.toast(f"📄 Load Profile: {final_load_file}")
     with st.spinner(f"Combining data for {selected_loc} ({selected_point}) from {final_start_y}-{final_end_y}..."):
@@ -867,7 +934,7 @@ if btn_run:
             'vpp_thresh': vpp_price,
             'tariff_data': tariff_snapshot,
             'location': f"{selected_loc} - {selected_point}",
-            'period': f"{final_start_y} to {final_end_y}",
+            'period': f"{final_start_y}" if final_start_y == final_end_y else f"{final_start_y} to {final_end_y}",
             'load_source': final_load_file,
             'load_multiplier': final_load_mult 
         }
