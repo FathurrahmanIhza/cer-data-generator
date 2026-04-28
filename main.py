@@ -966,9 +966,12 @@ if st.session_state['hasil_simulasi'] is not None:
         st.markdown("### 📋 Generated Simulation Info")
         
         with st.container(border=True):
-            st.markdown(f"**📍 Location:** `{used_p['location']}` | **🗓️ Period:** `{used_p['period']}` | **🏠 Load:** `{used_p['load_source']}` **(x {used_p.get('load_multiplier', 1.0)})**")
+            pr_pct = f"{int(used_p['solar_pr'] * 100)}%"
+            temp_val = f"{used_p['solar_temp']} / °C"
             
             if st.session_state.get('role', 'student') == 'admin':
+                st.markdown(f"**📍 Location:** `{used_p['location']}` | **🗓️ Period:** `{used_p['period']}` | **🏠 Load:** `{used_p['load_source']}` **(x {used_p.get('load_multiplier', 1.0)})**")
+                
                 st.divider()
                 
                 c_sys1, c_sys2, c_sys3 = st.columns(3)
@@ -977,8 +980,8 @@ if st.session_state['hasil_simulasi'] is not None:
                     st.markdown("#### ☀️ Solar PV")
                     st.markdown(f"""
                     - Capacity: **{used_p['solar']} kWp**
-                    - PR: **{used_p['solar_pr']}**
-                    - Temp Coeff: **{used_p['solar_temp']}**
+                    - PR: **{pr_pct}**
+                    - Temp Coeff: **{temp_val}**
                     """)
                     
                 with c_sys2:
@@ -996,27 +999,29 @@ if st.session_state['hasil_simulasi'] is not None:
                     - SoC Limits: **{int(used_p['soc_min']*100)}% - {int(used_p['soc_max']*100)}%**
                     - Initial SoC: **{int(used_p['bat_soc_init']*100)}%**
                     """)
-        if st.session_state.get('role', 'student') == 'admin':
-            with st.expander("💲 View Applied Tariff Details", expanded=False):
-                    schema_name = t_data.get('tariff_scheme', "Time of Use" if t_data.get('is_tou') else "Flat")
-                    st.markdown(f"**Scheme:** `{schema_name}`")
-                    
-                    if schema_name == "Wholesale Price":
-                        st.markdown("- **Import:** Spot Price + Market + Network + Other Fees\n- **Export:** Spot Price + Market Fees")
+            else:
+                st.markdown(f"**📍 Location:** `{used_p['location']}` | **🗓️ Period:** `{used_p['period']}` | **🏠 Load:** `{used_p['load_source']}` **(x {used_p.get('load_multiplier', 1.0)})** | **☀️ Solar PV:** PR `{pr_pct}` | Temp Coeff `{temp_val}`")
+
+        with st.expander("💲 View Applied Tariff Details", expanded=False):
+            schema_name = t_data.get('tariff_scheme', "Flat")
+            st.markdown(f"**Scheme:** `{schema_name}`")
+            
+            if schema_name == "Wholesale Price":
+                st.markdown("- **Import:** Spot Price + Market + Network + Other Fees\n- **Export:** Spot Price + Market Fees")
+            else:
+                tc1, tc2 = st.columns(2)
+                with tc1:
+                    st.markdown(f"**Export Tariff:**")
+                    if schema_name == "Time of Use":
+                        st.markdown(f"- Peak: **{t_data.get('exp_peak', 0.15)} AUD**\n- Shoulder: **{t_data.get('exp_shoulder', 0.10)} AUD**\n- Off-Peak: **{t_data.get('exp_offpeak', 0.05)} AUD**")
                     else:
-                        tc1, tc2 = st.columns(2)
-                        with tc1:
-                            st.markdown(f"**Export Tariff:**")
-                            if schema_name == "Time of Use":
-                                st.markdown(f"- Peak: **{t_data.get('exp_peak', 0.15)} AUD**\n- Shoulder: **{t_data.get('exp_shoulder', 0.10)} AUD**\n- Off-Peak: **{t_data.get('exp_offpeak', 0.05)} AUD**")
-                            else:
-                                st.markdown(f"Flat Rate: **{t_data.get('export_price', 0.08)} AUD/kWh**")
-                        with tc2:
-                            st.markdown(f"**Import Tariff:**")
-                            if schema_name == "Time of Use":
-                                st.markdown(f"- Peak: **{t_data['peak_price']} AUD**\n- Shoulder: **{t_data['shoulder_price']} AUD**\n- Off-Peak: **{t_data['offpeak_price']} AUD**")
-                            else:
-                                st.markdown(f"Flat Rate: **{t_data.get('import_flat', 0.20)} AUD/kWh**")
+                        st.markdown(f"Flat Rate: **{t_data.get('export_price', 0.08)} AUD/kWh**")
+                with tc2:
+                    st.markdown(f"**Import Tariff:**")
+                    if schema_name == "Time of Use":
+                        st.markdown(f"- Peak: **{t_data.get('peak_price', 0.45)} AUD**\n- Shoulder: **{t_data.get('shoulder_price', 0.25)} AUD**\n- Off-Peak: **{t_data.get('offpeak_price', 0.15)} AUD**")
+                    else:
+                        st.markdown(f"Flat Rate: **{t_data.get('import_flat', 0.20)} AUD/kWh**")
 
         st.markdown("### 💾 Export Data")
         
