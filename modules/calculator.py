@@ -10,7 +10,10 @@ MODE_PEAK     = 3
 @jit(nopython=True)
 def simulate_battery_numba(
     net_load_arr,      
-    strategy_arr,     
+    price_arr,           
+    is_offpeak_arr,     
+    is_vpp_arr,          
+    tariff_mode_int,   
     bat_cap,           
     init_soc_pct,     
     min_soc_pct,       
@@ -21,78 +24,85 @@ def simulate_battery_numba(
 ):
     n = len(net_load_arr)
     
-    # Pre-allocation array hasil
     soc_tracker = np.zeros(n)
     bat_power_out = np.zeros(n) 
     
-    # Setup Variable Awal
     current_kwh = bat_cap * init_soc_pct
     min_kwh = bat_cap * min_soc_pct
     max_kwh = bat_cap * max_soc_pct
     
-    # Efisiensi satu arah (akar kuadrat dari roundtrip)
     eff_oneway = eff_roundtrip ** 0.5
-    
     dt = 5.0 / 60.0 
     
+    # =====================================================================
+    # PENGATURAN ARBITRASE 
+    # =====================================================================
+    TARGET_SOC_ARB_PCT = 0.30     
+    PRICE_WHOLESALE_CHEAP = 0.05  
+    PRICE_NEGATIVE = 0.0          
+    # =====================================================================
+
     for i in range(n):
         net_load = net_load_arr[i]
-        mode = strategy_arr[i]
         
+        # Ambil kondisi spesifik pada jam ini dari array
+        current_price = price_arr[i]
+        is_off_peak = is_offpeak_arr[i]
+        is_vpp_dispatch = is_vpp_arr[i]
+
         target_power = 0.0
+        target_soc_kwh = bat_cap * TARGET_SOC_ARB_PCT
         
-        
-        if mode == MODE_DISCHARGE:
-            # Kasus VPP: Paksa Discharge Maksimal
+        # 1. PRIORITAS TERTINGGI: VPP DISPATCH
+        if is_vpp_dispatch:
             target_power = max_dis_kw
             
-        elif mode == MODE_CHARGE:
-            # Kasus Off-peak / Negative Price: Paksa Charge Maksimal
+        # 2. PRIORITAS KEDUA: VPP CHARGE (Harga Minus)
+        elif current_price < PRICE_NEGATIVE:
             target_power = -max_chg_kw
             
-        elif mode == MODE_PEAK:
-            # Kasus Peak: Self Consumption / Shaving
+        # 3. PRIORITAS KETIGA: ARBITRASE TOU & WHOLESALE MURAH
+        # tariff_mode_int: 1 = ToU, 2 = Wholesale Price
+        elif (tariff_mode_int == 1 and is_off_peak) or (tariff_mode_int == 2 and current_price <= PRICE_WHOLESALE_CHEAP):
+            if current_kwh < target_soc_kwh:
+                power_to_target = -((target_soc_kwh - current_kwh) / (eff_oneway * dt))
+                if net_load < 0:
+                    target_power = min(net_load, power_to_target)
+                else:
+                    target_power = power_to_target
+            else:
+                if net_load < 0:
+                    target_power = net_load
+                else:
+                    target_power = 0.0
+
+        # 4. PRIORITAS KEEMPAT: BASELINE NORMAL
+        else:
             if net_load > 0:
                 target_power = net_load
             else:
-                target_power = 0.0
-                
-        else: 
-            # Kasus Shoulder: Hanya charge jika ada surplus solar (net_load negatif)
-            if net_load < 0:
                 target_power = net_load
-            else:
-                target_power = 0.0
-        
-        # Batasi Power sesuai Rating Inverter
+                
+        # --- FISIKA BATERAI (JANGAN DIUBAH) ---
         target_power = max(-max_chg_kw, min(max_dis_kw, target_power))
-        
         real_power = 0.0
         
         if target_power < 0: 
-            # --- CHARGING ---
             max_energy_in = max_kwh - current_kwh
-            
             limit_p_charge = -(max_energy_in / (eff_oneway * dt))
             real_power = max(target_power, limit_p_charge)
-            # Update SoC
             energy_change = real_power * eff_oneway * dt
             current_kwh -= energy_change 
-            
         else: 
-            # --- DISCHARGING ---
             max_energy_out = current_kwh - min_kwh
-            
             limit_p_discharge = (max_energy_out * eff_oneway) / dt
             real_power = min(target_power, limit_p_discharge)
-            # Update SoC
             energy_change = (real_power / eff_oneway) * dt
             current_kwh -= energy_change
             
         if current_kwh < 0: current_kwh = 0.0
         if current_kwh > bat_cap: current_kwh = bat_cap
             
-        # Simpan Hasil
         bat_power_out[i] = real_power
         if bat_cap > 0:
             soc_tracker[i] = (current_kwh / bat_cap) * 100.0
@@ -135,27 +145,30 @@ def run_simulation(df, params):
     time_float = timestamps.dt.hour + timestamps.dt.minute / 60.0
     time_float = time_float.to_numpy(dtype=np.float64)
     
+    # 1. Siapkan Array Waktu
     is_offpeak = get_time_mask(time_float, params['t_offpeak_start'], params['t_offpeak_end'])
-    is_peak    = get_time_mask(time_float, params['t_peak_start'], params['t_peak_end'])
     
+    # 2. Siapkan Array Harga & VPP
     arr_price = df['price_import'].to_numpy(dtype=np.float64)
     vpp_thresh = params['dispatch_price_threshold']
+    is_vpp_arr = arr_price >= vpp_thresh
     
-    # Default: Shoulder (Mode 0)
-    strategy_map = np.full(len(df), MODE_SHOULDER, dtype=np.int8)
-    
-    # 1. Base Time of Use
-    strategy_map[is_peak] = MODE_PEAK       # Mode 3
-    strategy_map[is_offpeak] = MODE_CHARGE  # Mode 1
-    # 2. Override: Negative Price
-    strategy_map[arr_price < 0] = MODE_CHARGE # Mode 1
-    # 3. Override: VPP (Highest Priority)
-    strategy_map[arr_price > vpp_thresh] = MODE_DISCHARGE # Mode 2
-
-    # --- 4. Kalkulasi Baterai ---
+    # 3. Konversi Nama Skema menjadi Angka (Karena Numba tidak bisa baca huruf)
+    scheme_name = params.get('tariff_scheme', 'Flat')
+    if scheme_name == 'Time of Use':
+        tariff_mode_int = 1
+    elif scheme_name == 'Wholesale Price':
+        tariff_mode_int = 2
+    else:
+        tariff_mode_int = 0 # Flat
+        
+    # --- 4. Kalkulasi Baterai (Panggil dengan argumen yang baru) ---
     soc_pct, bat_power = simulate_battery_numba(
         net_load_pure,
-        strategy_map,
+        arr_price,         # Data Harga
+        is_offpeak,        # Data Kapan Off-Peak
+        is_vpp_arr,        # Data Kapan Harga Meledak
+        tariff_mode_int,   # Skema Tarif dalam bentuk angka
         params['battery_capacity_kwh'],
         params['battery_initial_soc'],
         params['soc_min_pct'],

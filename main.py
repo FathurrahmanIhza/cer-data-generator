@@ -618,7 +618,10 @@ if st.session_state['role'] == 'admin':
 
                 with st.expander("💲 View Applied Tariff Details", expanded=False):
                     schema_name = t_data.get('tariff_scheme', "Flat")
-                    st.markdown(f"**⚡ Scheme:** `{schema_name}`")
+
+                    display_name = "Wholesale Passthrough Price" if schema_name == "Wholesale Price" else schema_name
+            
+                    st.markdown(f"**Scheme:** `{display_name}`")
                     
                     if schema_name == "Wholesale Price":
                         st.markdown("- **Import:** Spot Price + Market + Network + Other Fees\n- **Export:** Spot Price + Market Fees")
@@ -1004,7 +1007,10 @@ if st.session_state['hasil_simulasi'] is not None:
 
         with st.expander("💲 View Applied Tariff Details", expanded=False):
             schema_name = t_data.get('tariff_scheme', "Flat")
-            st.markdown(f"**Scheme:** `{schema_name}`")
+
+            display_name = "Wholesale Passthrough Price" if schema_name == "Wholesale Price" else schema_name
+            
+            st.markdown(f"**Scheme:** `{display_name}`")
             
             if schema_name == "Wholesale Price":
                 st.markdown("- **Import:** Spot Price + Market + Network + Other Fees\n- **Export:** Spot Price + Market Fees")
@@ -1045,7 +1051,7 @@ if st.session_state['hasil_simulasi'] is not None:
         df_export = df_export[final_cols]
 
         df_export = df_export.rename(columns={
-            'irradiance': 'irradiance_Wh/m^2',
+            'irradiance': 'irradiance_W/m^2',
             'temperature': 'temperature_C',
             'load_profile': 'load_kW',
             'price_profile': 'price_AUD/mWh',
