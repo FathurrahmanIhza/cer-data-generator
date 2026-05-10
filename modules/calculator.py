@@ -11,9 +11,11 @@ MODE_PEAK     = 3
 def simulate_battery_numba(
     net_load_arr,      
     price_arr,           
-    is_offpeak_arr,     
+    is_offpeak_arr,      
+    is_peak_arr,        
+    is_shoulder_arr,    
     is_vpp_arr,          
-    tariff_mode_int,   
+    tariff_mode_int,     
     bat_cap,           
     init_soc_pct,     
     min_soc_pct,       
@@ -34,54 +36,85 @@ def simulate_battery_numba(
     eff_oneway = eff_roundtrip ** 0.5
     dt = 5.0 / 60.0 
     
-    # =====================================================================
-    # PENGATURAN ARBITRASE 
-    # =====================================================================
     TARGET_SOC_ARB_PCT = 0.30     
     PRICE_WHOLESALE_CHEAP = 0.05  
+    PRICE_WHOLESALE_HIGH = 0.10   
     PRICE_NEGATIVE = 0.0          
-    # =====================================================================
 
     for i in range(n):
         net_load = net_load_arr[i]
         
-        # Ambil kondisi spesifik pada jam ini dari array
         current_price = price_arr[i]
         is_off_peak = is_offpeak_arr[i]
+        is_peak = is_peak_arr[i]
+        is_shoulder = is_shoulder_arr[i]
         is_vpp_dispatch = is_vpp_arr[i]
 
         target_power = 0.0
         target_soc_kwh = bat_cap * TARGET_SOC_ARB_PCT
         
+        # ---------------------------------------------------------
         # 1. PRIORITAS TERTINGGI: VPP DISPATCH
+        # ---------------------------------------------------------
         if is_vpp_dispatch:
             target_power = max_dis_kw
             
+        # ---------------------------------------------------------
         # 2. PRIORITAS KEDUA: VPP CHARGE (Harga Minus)
+        # ---------------------------------------------------------
         elif current_price < PRICE_NEGATIVE:
             target_power = -max_chg_kw
             
-        # 3. PRIORITAS KETIGA: ARBITRASE TOU & WHOLESALE MURAH
-        # tariff_mode_int: 1 = ToU, 2 = Wholesale Price
-        elif (tariff_mode_int == 1 and is_off_peak) or (tariff_mode_int == 2 and current_price <= PRICE_WHOLESALE_CHEAP):
-            if current_kwh < target_soc_kwh:
-                power_to_target = -((target_soc_kwh - current_kwh) / (eff_oneway * dt))
-                if net_load < 0:
-                    target_power = min(net_load, power_to_target)
+        # ---------------------------------------------------------
+        # 3. SKEMA TIME OF USE (ToU)
+        # ---------------------------------------------------------
+        elif tariff_mode_int == 1:
+            if is_off_peak:
+                # Off-peak: Boleh discharge, TAPI batas bawahnya 30%.
+                if current_kwh < target_soc_kwh:
+                    power_to_target = -((target_soc_kwh - current_kwh) / (eff_oneway * dt))
+                    target_power = min(net_load, power_to_target) if net_load < 0 else power_to_target
                 else:
-                    target_power = power_to_target
-            else:
-                if net_load < 0:
-                    target_power = net_load
-                else:
-                    target_power = 0.0
+                    if net_load > 0:
+                        max_allowed_discharge = (current_kwh - target_soc_kwh) * eff_oneway / dt
+                        target_power = min(net_load, max_allowed_discharge)
+                    else:
+                        target_power = net_load
+            
+            elif is_shoulder:
+                # Shoulder: Boleh discharge & charge normal (Flat)
+                target_power = net_load
+                
+            else: # Jam Peak 
+                # Peak: Boleh discharge & charge normal
+                target_power = net_load
 
-        # 4. PRIORITAS KEEMPAT: BASELINE NORMAL
-        else:
-            if net_load > 0:
+        # ---------------------------------------------------------
+        # 4. SKEMA WHOLESALE PRICE
+        # ---------------------------------------------------------
+        elif tariff_mode_int == 2:
+            if current_price <= PRICE_WHOLESALE_CHEAP:
+                # Harga Murah: Beli listrik sampai target 30%. Dilarang discharge ke rumah.
+                if current_kwh < target_soc_kwh:
+                    power_to_target = -((target_soc_kwh - current_kwh) / (eff_oneway * dt))
+                    target_power = min(net_load, power_to_target) if net_load < 0 else power_to_target
+                else:
+                    target_power = net_load if net_load < 0 else 0.0
+            
+            elif current_price >= PRICE_WHOLESALE_HIGH:
+                # Harga Mahal: Baterai diizinkan menutupi beban rumah (Self Consumption).
                 target_power = net_load
+                
             else:
-                target_power = net_load
+                # Harga Normal (50 - 200): Baterai diam/nahan daya. Hanya charge dari sisa matahari.
+                target_power = net_load if net_load < 0 else 0.0
+
+        # ---------------------------------------------------------
+        # 5. SKEMA FLAT (Baseline Normal)
+        # ---------------------------------------------------------
+        else:
+            # Apapun jamnya, prioritas utama: Solar -> Baterai -> Grid
+            target_power = net_load
                 
         # --- FISIKA BATERAI (JANGAN DIUBAH) ---
         target_power = max(-max_chg_kw, min(max_dis_kw, target_power))
@@ -110,7 +143,6 @@ def simulate_battery_numba(
             soc_tracker[i] = 0.0
             
     return soc_tracker, bat_power_out
-
 
 def get_time_mask(time_float_arr, start_t, end_t):
     """
@@ -145,30 +177,34 @@ def run_simulation(df, params):
     time_float = timestamps.dt.hour + timestamps.dt.minute / 60.0
     time_float = time_float.to_numpy(dtype=np.float64)
     
-    # 1. Siapkan Array Waktu
+    # 1. Siapkan Semua Array Waktu untuk ToU
     is_offpeak = get_time_mask(time_float, params['t_offpeak_start'], params['t_offpeak_end'])
+    is_peak    = get_time_mask(time_float, params['t_peak_start'], params['t_peak_end'])
+    is_shoulder = get_time_mask(time_float, params['t_shoulder_start'], params['t_shoulder_end'])
     
     # 2. Siapkan Array Harga & VPP
     arr_price = df['price_import'].to_numpy(dtype=np.float64)
     vpp_thresh = params['dispatch_price_threshold']
     is_vpp_arr = arr_price >= vpp_thresh
     
-    # 3. Konversi Nama Skema menjadi Angka (Karena Numba tidak bisa baca huruf)
+    # 3. Konversi Nama Skema
     scheme_name = params.get('tariff_scheme', 'Flat')
     if scheme_name == 'Time of Use':
         tariff_mode_int = 1
     elif scheme_name == 'Wholesale Price':
         tariff_mode_int = 2
     else:
-        tariff_mode_int = 0 # Flat
+        tariff_mode_int = 0
         
-    # --- 4. Kalkulasi Baterai (Panggil dengan argumen yang baru) ---
+    # --- 4. Kalkulasi Baterai (Sekarang melempar is_peak dan is_shoulder) ---
     soc_pct, bat_power = simulate_battery_numba(
         net_load_pure,
-        arr_price,         # Data Harga
-        is_offpeak,        # Data Kapan Off-Peak
-        is_vpp_arr,        # Data Kapan Harga Meledak
-        tariff_mode_int,   # Skema Tarif dalam bentuk angka
+        arr_price,
+        is_offpeak,
+        is_peak,         
+        is_shoulder,      
+        is_vpp_arr,
+        tariff_mode_int,
         params['battery_capacity_kwh'],
         params['battery_initial_soc'],
         params['soc_min_pct'],
