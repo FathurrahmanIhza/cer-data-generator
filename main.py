@@ -571,6 +571,7 @@ if st.session_state['role'] == 'admin':
                                 st.session_state['regen_reg'] = reg
                                 st.session_state['regen_pt'] = pt
                                 st.session_state['regen_params'] = saved_params
+                                st.session_state['regen_df_result'] = df_result_regen
 
                     except Exception as e:
                         st.error(f"Failed To Process Data: {e}")
@@ -648,6 +649,50 @@ if st.session_state['role'] == 'admin':
                     mime="text/csv",
                     key=f"dl_regen_{st.session_state['regen_nim']}" 
                 )
+
+                if 'regen_df_result' in st.session_state and st.session_state['regen_df_result'] is not None:
+                    st.divider()
+                    st.subheader("📊 Detailed Analysis (Re-generated Data)")
+                    
+                    df_regen_res = st.session_state['regen_df_result'].copy()
+                    df_regen_res['year']  = df_regen_res['timestamp'].dt.year
+                    df_regen_res['month'] = df_regen_res['timestamp'].dt.month
+                    
+                    available_years_regen = sorted(df_regen_res['year'].unique())
+                    
+                    selected_vis_year_regen = st.selectbox("Select Year (Re-generated):", available_years_regen, key="sb_year_regen")
+                    df_vis_year_regen = df_regen_res[df_regen_res['year'] == selected_vis_year_regen].copy()
+                    
+                    factor = 5/60
+                    col_load_regen = 'load_profile' if 'load_profile' in df_vis_year_regen.columns else 'beban_rumah_kw'
+                    col_bat_regen  = 'battery_power_ac_kw' if 'battery_power_ac_kw' in df_vis_year_regen.columns else 'battery_power_kw'
+                    
+                    total_solar_regen = df_vis_year_regen['solar_output_kw'].sum() * factor
+                    total_load_regen  = df_vis_year_regen[col_load_regen].sum() * factor
+                    total_import_regen = df_vis_year_regen['grid_net_kw'].apply(lambda x: x if x > 0 else 0).sum() * factor
+                    
+                    m1_r, m2_r, m3_r = st.columns(3)
+                    m1_r.metric(f"Total Solar ({selected_vis_year_regen})", f"{total_solar_regen:,.2f} kWh")
+                    m2_r.metric(f"Total Load ({selected_vis_year_regen})", f"{total_load_regen:,.2f} kWh")
+                    m3_r.metric(f"Grid Import ({selected_vis_year_regen})", f"{total_import_regen:,.2f} kWh", delta_color="inverse")
+
+                    visualizer.plot_annual_overview(df_vis_year_regen, col_bat_regen, selected_vis_year_regen)
+                    
+                    st.divider()
+
+                    available_months_regen = sorted(df_vis_year_regen['month'].unique())
+                    month_map_regen = {m: calendar.month_name[m] for m in available_months_regen}
+                    
+                    selected_month_name_regen = st.selectbox(
+                        "Select Month for Profile (Re-generated):", 
+                        list(month_map_regen.values()), 
+                        key="sb_month_regen"
+                    )
+                    
+                    selected_vis_month_regen = [k for k, v in month_map_regen.items() if v == selected_month_name_regen][0]
+                    df_vis_month_regen = df_vis_year_regen[df_vis_year_regen['month'] == selected_vis_month_regen].copy()
+                    
+                    visualizer.plot_monthly_analysis(df_vis_month_regen, col_load_regen, selected_month_name_regen, selected_vis_year_regen)
                 
         tracker_ui()
 

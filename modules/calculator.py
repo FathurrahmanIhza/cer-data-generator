@@ -37,14 +37,14 @@ def simulate_battery_numba(
     dt = 5.0 / 60.0 
     
     TARGET_SOC_ARB_PCT = 0.30     
-    PRICE_WHOLESALE_CHEAP = 50  
-    PRICE_WHOLESALE_HIGH = 100   
+    PRICE_WHOLESALE_CHEAP = 0.05  # Diubah ke AUD/kWh (50 AUD/MWh)
+    PRICE_WHOLESALE_HIGH = 0.10   # Diubah ke AUD/kWh (100 AUD/MWh)
     PRICE_NEGATIVE = 0.0          
 
     for i in range(n):
         net_load = net_load_arr[i]
         
-        current_price = price_arr[i]
+        current_price = price_arr[i] # Sekarang membaca Tariff Export matang
         is_off_peak = is_offpeak_arr[i]
         is_peak = is_peak_arr[i]
         is_shoulder = is_shoulder_arr[i]
@@ -94,21 +94,25 @@ def simulate_battery_numba(
         # ---------------------------------------------------------
         elif tariff_mode_int == 2:
             if current_price <= PRICE_WHOLESALE_CHEAP:
-                # Harga Murah: Beli listrik sampai target 30%. Dilarang discharge ke rumah.
                 if current_kwh < target_soc_kwh:
-                    power_to_target = -((target_soc_kwh - current_kwh) / (eff_oneway * dt))
-                    target_power = min(net_load, power_to_target) if net_load < 0 else power_to_target
+                    if net_load < 0:
+                        # ADA excess matahari: Murni pakai matahari saja, DILARANG beli tambahan dari grid
+                        target_power = net_load
+                    else:
+                        # TIDAK ADA excess matahari: Beli murni dari grid untuk kejar 30%
+                        power_to_target = -((target_soc_kwh - current_kwh) / (eff_oneway * dt))
+                        target_power = power_to_target
                 else:
+                    # Sudah 30% ke atas: Hanya terima excess matahari, tidak beli grid
                     target_power = net_load if net_load < 0 else 0.0
             
             elif current_price >= PRICE_WHOLESALE_HIGH:
-                # Harga Mahal: Baterai diizinkan menutupi beban rumah (Self Consumption).
+                # Boleh discharge. 
                 target_power = net_load
                 
             else:
-                # Harga Normal (50 - 200): Baterai diam/nahan daya. Hanya charge dari sisa matahari.
+                # BATERAI DIAM (0.0). Rumah murni pakai listrik Grid jika tidak ada matahari.
                 target_power = net_load if net_load < 0 else 0.0
-
         # ---------------------------------------------------------
         # 5. SKEMA FLAT (Baseline Normal)
         # ---------------------------------------------------------
@@ -172,81 +176,25 @@ def run_simulation(df, params):
     # Hitung Net Load Awal (Beban Murni - Solar)
     net_load_pure = arr_load - solar_kw
     
-    # PERSIAPAN STRATEGI MODE 
-    timestamps = df['timestamp']
-    time_float = timestamps.dt.hour + timestamps.dt.minute / 60.0
-    time_float = time_float.to_numpy(dtype=np.float64)
-    
-    # 1. Siapkan Semua Array Waktu untuk ToU
-    is_offpeak = get_time_mask(time_float, params['t_offpeak_start'], params['t_offpeak_end'])
-    is_peak    = get_time_mask(time_float, params['t_peak_start'], params['t_peak_end'])
-    is_shoulder = get_time_mask(time_float, params['t_shoulder_start'], params['t_shoulder_end'])
-    
-    # 2. Siapkan Array Harga & VPP
-    arr_price = df['price_import'].to_numpy(dtype=np.float64)
-    vpp_thresh = params['dispatch_price_threshold']
-    is_vpp_arr = arr_price >= vpp_thresh
-    
-    # 3. Konversi Nama Skema
-    scheme_name = params.get('tariff_scheme', 'Flat')
-    if scheme_name == 'Time of Use':
-        tariff_mode_int = 1
-    elif scheme_name == 'Wholesale Price':
-        tariff_mode_int = 2
-    else:
-        tariff_mode_int = 0
-        
-    # --- 4. Kalkulasi Baterai (Sekarang melempar is_peak dan is_shoulder) ---
-    soc_pct, bat_power = simulate_battery_numba(
-        net_load_pure,
-        arr_price,
-        is_offpeak,
-        is_peak,         
-        is_shoulder,      
-        is_vpp_arr,
-        tariff_mode_int,
-        params['battery_capacity_kwh'],
-        params['battery_initial_soc'],
-        params['soc_min_pct'],
-        params['soc_max_pct'],
-        params['max_charge_kw'],
-        params['max_discharge_kw'],
-        params['battery_efficiency']
-    )
-    
-
     df_res = df.copy()
-    
-    df_res['solar_output_kw'] = solar_kw
-    df_res['battery_power_ac_kw'] = bat_power
-    df_res['battery_soc_pct'] = soc_pct
-    
-    # Hitung Grid Net 
-    df_res['grid_net_kw'] = arr_load - solar_kw - bat_power
-    df_res['vpp_status'] = (arr_price > vpp_thresh)
-    
     if 'price_import' in df_res.columns:
         df_res.rename(columns={'price_import': 'price_profile'}, inplace=True)
 
-    # Hitung Kapasitas Baterai kWh
-    df_res['battery_soc_kwh'] = (df_res['battery_soc_pct'] / 100.0) * params['battery_capacity_kwh']
-    
-    # 2. Hitung Tarif Ekspor & Impor
+    # -------------------------------------------------------------
+    # 2. Hitung Tarif Ekspor & Impor (Dipindah ke atas)
+    # -------------------------------------------------------------
     scheme = params.get('tariff_scheme', 'Flat')
     
     if scheme == 'Wholesale Price': 
         df_fees = params.get('df_wholesale_fees', pd.DataFrame())
         
         if 'price_profile' in df_res.columns and not df_fees.empty:
-            
             spot_kwh = df_res['price_profile'] / 1000.0
-            
             
             years = df_res['timestamp'].dt.year
             months = df_res['timestamp'].dt.month
             
             fy_start_yr = np.where(months >= 7, years, years - 1)
-            
             fy_str = (pd.Series(fy_start_yr) % 100).astype(str).str.zfill(2) + '/' + ((pd.Series(fy_start_yr) + 1) % 100).astype(str).str.zfill(2)
             
             m_map = df_fees.set_index('FY_Year')['Market_Fee'].to_dict()
@@ -300,6 +248,66 @@ def run_simulation(df, params):
     else: # Default: Flat
         df_res['tariff_import_AUD'] = params['import_flat']
         df_res['tariff_export_AUD'] = params['export_price']
+        
+    # -------------------------------------------------------------
+    # PERSIAPAN STRATEGI MODE BATERAI
+    # -------------------------------------------------------------
+    timestamps = df_res['timestamp']
+    time_float = timestamps.dt.hour + timestamps.dt.minute / 60.0
+    time_float = time_float.to_numpy(dtype=np.float64)
+    
+    # 1. Siapkan Semua Array Waktu untuk ToU
+    is_offpeak = get_time_mask(time_float, params['t_offpeak_start'], params['t_offpeak_end'])
+    is_peak    = get_time_mask(time_float, params['t_peak_start'], params['t_peak_end'])
+    is_shoulder = get_time_mask(time_float, params['t_shoulder_start'], params['t_shoulder_end'])
+    
+    # 2. Siapkan Array Harga (VPP tetap pakai raw price, Arbitrase pakai Tariff Export Matang)
+    arr_price_raw = df_res['price_profile'].to_numpy(dtype=np.float64)
+    vpp_thresh = params['dispatch_price_threshold']
+    is_vpp_arr = arr_price_raw >= vpp_thresh
+    
+    arr_price_export = df_res['tariff_export_AUD'].to_numpy(dtype=np.float64)
+    
+    # 3. Konversi Nama Skema
+    scheme_name = params.get('tariff_scheme', 'Flat')
+    if scheme_name == 'Time of Use':
+        tariff_mode_int = 1
+    elif scheme_name == 'Wholesale Price':
+        tariff_mode_int = 2
+    else:
+        tariff_mode_int = 0
+        
+    # --- 4. Kalkulasi Baterai (Melempar arr_price_export yang sudah ada Market Fee) ---
+    soc_pct, bat_power = simulate_battery_numba(
+        net_load_pure,
+        arr_price_export,
+        is_offpeak,
+        is_peak,         
+        is_shoulder,      
+        is_vpp_arr,
+        tariff_mode_int,
+        params['battery_capacity_kwh'],
+        params['battery_initial_soc'],
+        params['soc_min_pct'],
+        params['soc_max_pct'],
+        params['max_charge_kw'],
+        params['max_discharge_kw'],
+        params['battery_efficiency']
+    )
+    
+    # -------------------------------------------------------------
+    # FINALISASI DATAFRAME
+    # -------------------------------------------------------------
+    df_res['solar_output_kw'] = solar_kw
+    df_res['battery_power_ac_kw'] = bat_power
+    df_res['battery_soc_pct'] = soc_pct
+    
+    # Hitung Grid Net 
+    df_res['grid_net_kw'] = arr_load - solar_kw - bat_power
+    df_res['vpp_status'] = is_vpp_arr
+    
+    # Hitung Kapasitas Baterai kWh
+    df_res['battery_soc_kwh'] = (df_res['battery_soc_pct'] / 100.0) * params['battery_capacity_kwh']
         
     final_cols = [
         'timestamp',
