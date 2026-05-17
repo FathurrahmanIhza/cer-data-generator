@@ -148,6 +148,64 @@ def simulate_battery_numba(
             
     return soc_tracker, bat_power_out
 
+# =====================================================================
+# FUNGSI NUMBA UNTUK EXTRA IMPORT VPP 
+# =====================================================================
+@jit(nopython=True)
+def calculate_extra_import_numba(vpp_discharge_arr, bat_power_arr, grid_net_arr, soc_kwh_arr, dt_hours):
+    n_rows = len(grid_net_arr)
+    arr_extra_import = np.zeros(n_rows)
+    
+    arr_bat_discharge = np.where(bat_power_arr > 0, bat_power_arr, 0.0)
+    arr_grid_import = np.where(grid_net_arr > 0, grid_net_arr, 0.0)
+    arr_vpp_bat_discharge = np.where(vpp_discharge_arr, arr_bat_discharge, 0.0)
+    
+    idx = 0
+    while idx < n_rows:
+        if vpp_discharge_arr[idx]:
+            start_idx = idx
+            end_idx = idx
+            gap = 0
+            j = idx + 1
+            
+            while j < n_rows:
+                if vpp_discharge_arr[j]:
+                    end_idx = j
+                    gap = 0
+                else:
+                    gap += 1
+                    if gap > 1:
+                        break
+                j += 1
+                
+            soc_start = soc_kwh_arr[start_idx]
+            
+            e_vpp_kwh = 0.0
+            for sum_idx in range(start_idx, end_idx + 1):
+                e_vpp_kwh += arr_vpp_bat_discharge[sum_idx]
+            e_vpp_kwh *= dt_hours
+            
+            e_import_kwh = 0.0
+            max_tracking_steps = min(n_rows, end_idx + 1 + 288)
+            
+            for k in range(end_idx + 1, max_tracking_steps):
+                imp_kw = arr_grid_import[k]
+                soc_now = soc_kwh_arr[k]
+                
+                if imp_kw > 0:
+                    arr_extra_import[k] = imp_kw
+                    e_import_kwh += imp_kw * dt_hours
+                    
+                if soc_now >= soc_start or e_import_kwh >= e_vpp_kwh:
+                    break
+                    
+            idx = end_idx + 1
+        else:
+            idx += 1
+            
+    return arr_extra_import
+
+
 def get_time_mask(time_float_arr, start_t, end_t):
     """
     Membuat array True/False apakah jam saat ini masuk rentang waktu.
@@ -296,7 +354,7 @@ def run_simulation(df, params):
     )
     
     # -------------------------------------------------------------
-    # FINALISASI DATAFRAME
+    # PENGGABUNGAN HASIL BATERAI KE DATAFRAME
     # -------------------------------------------------------------
     df_res['solar_output_kw'] = solar_kw
     df_res['battery_power_ac_kw'] = bat_power
@@ -309,20 +367,63 @@ def run_simulation(df, params):
     # Hitung Kapasitas Baterai kWh
     df_res['battery_soc_kwh'] = (df_res['battery_soc_pct'] / 100.0) * params['battery_capacity_kwh']
         
+    # =====================================================================
+    # FINALISASI KALKULASI & EKONOMI VPP
+    # =====================================================================
+    dt_hours = 5.0 / 60.0
+    
+    # 1. Aliran Daya Dasar
+    df_res['grid_import_kw'] = np.where(df_res['grid_net_kw'] > 0, df_res['grid_net_kw'], 0)
+    df_res['grid_export_kw'] = np.where(df_res['grid_net_kw'] < 0, -df_res['grid_net_kw'], 0)
+    df_res['vpp_charge'] = arr_price_raw < 0
+    
+    # 2. Akuntansi VPP Discharge
+    df_res['vpp_battery_discharge_kw'] = np.where(df_res['vpp_status'] > 0, np.where(df_res['battery_power_ac_kw'] > 0, df_res['battery_power_ac_kw'], 0), 0)
+    df_res['vpp_grid_export_kw'] = np.where(df_res['vpp_status'] > 0, df_res['grid_export_kw'], 0)
+    
+    # 3. Kalkulasi Extra Import Menggunakan Numba (Sangat Cepat)
+    arr_soc_kwh = df_res['battery_soc_kwh'].to_numpy()
+    arr_extra_import = calculate_extra_import_numba(
+        df_res['vpp_status'].to_numpy() > 0, 
+        df_res['battery_power_ac_kw'].to_numpy(), 
+        df_res['grid_net_kw'].to_numpy(), 
+        arr_soc_kwh, 
+        dt_hours
+    )
+    df_res['vpp_grid_import_after_discharge_kw'] = arr_extra_import
+
+    # 4. Kalkulasi Ekonomi (Financials)
+    tariff_import = df_res.get('tariff_import_AUD', 0.20)
+    tariff_export = df_res.get('tariff_export_AUD', 0.08)
+    
+    df_res['vpp_export_value_AUD'] = (df_res['vpp_grid_export_kw'] * dt_hours) * tariff_export
+    df_res['vpp_extra_import_cost_AUD'] = (df_res['vpp_grid_import_after_discharge_kw'] * dt_hours) * tariff_import
+    df_res['vpp_operational_net_value_AUD'] = df_res['vpp_export_value_AUD'] - df_res['vpp_extra_import_cost_AUD']
+    
+    # 5. Kalkulasi Perbandingan Tagihan (Bill Comparison)
+    df_res['bill_actual'] = (df_res['grid_import_kw'] * dt_hours * tariff_import) - (df_res['grid_export_kw'] * dt_hours * tariff_export)
+    
+    # Skenario Solar Only
+    col_load = 'load_profile' if 'load_profile' in df_res.columns else 'beban_rumah_kw'
+    net_solar_only = df_res[col_load] - df_res['solar_output_kw']
+    import_solar = np.where(net_solar_only > 0, net_solar_only, 0)
+    export_solar = np.where(net_solar_only < 0, -net_solar_only, 0)
+    df_res['bill_solar_only'] = (import_solar * dt_hours * tariff_import) - (export_solar * dt_hours * tariff_export)
+    
+    # Skenario Grid Only
+    df_res['bill_grid_only'] = (df_res[col_load] * dt_hours) * tariff_import
+
+    # =====================================================================
+    # DAFTAR KOLOM FINAL (FINAL COLS)
+    # =====================================================================
     final_cols = [
-        'timestamp',
-        'irradiance',
-        'temperature',
-        'load_profile',
-        'price_profile',
-        'solar_output_kw',
-        'vpp_status',
-        'battery_soc_pct',
-        'battery_soc_kwh',
-        'battery_power_ac_kw',
-        'grid_net_kw',
-        'tariff_import_AUD',
-        'tariff_export_AUD'
+        'timestamp', 'irradiance', 'temperature', 'load_profile', 'price_profile', 
+        'solar_output_kw', 'battery_soc_pct', 'battery_soc_kwh', 'battery_power_ac_kw', 
+        'grid_net_kw', 'tariff_import_AUD', 'tariff_export_AUD',
+        'vpp_status', 'vpp_charge', 'grid_import_kw', 'grid_export_kw',
+        'vpp_battery_discharge_kw', 'vpp_grid_export_kw', 'vpp_grid_import_after_discharge_kw',
+        'vpp_export_value_AUD', 'vpp_extra_import_cost_AUD', 'vpp_operational_net_value_AUD',
+        'bill_actual', 'bill_solar_only', 'bill_grid_only'
     ]
     
     avail_cols = [c for c in final_cols if c in df_res.columns]
