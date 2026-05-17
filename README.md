@@ -1,6 +1,6 @@
 # CER Data Generator
 
-A Python-based simulation and analysis tool for Consumer Energy Resources (CER), focusing on rooftop PV, battery storage, and Virtual Power Plant (VPP) operation under market conditions.
+A Streamlit and Python-based simulation and analysis tool for Consumer Energy Resources (CER), focusing on rooftop PV, battery storage, and Virtual Power Plant (VPP) operation under market conditions.
 
 This project is designed to generate and analyse residential energy telemetry data, evaluate battery dispatch behaviour, and assess the operational and financial impacts of VPP participation.
 
