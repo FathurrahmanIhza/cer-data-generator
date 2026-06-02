@@ -10,7 +10,8 @@ MODE_PEAK     = 3
 @jit(nopython=True)
 def simulate_battery_numba(
     net_load_arr,      
-    price_arr,           
+    spot_price_arr,       
+    tariff_import_arr,    
     is_offpeak_arr,      
     is_peak_arr,        
     is_shoulder_arr,    
@@ -37,14 +38,12 @@ def simulate_battery_numba(
     dt = 5.0 / 60.0 
     
     TARGET_SOC_ARB_PCT = 0.30     
-    PRICE_WHOLESALE_CHEAP = 0.05  # Diubah ke AUD/kWh (50 AUD/MWh)
-    PRICE_WHOLESALE_HIGH = 0.10   # Diubah ke AUD/kWh (100 AUD/MWh)
+    PRICE_WHOLESALE_CHEAP = 0.05  
+    PRICE_WHOLESALE_HIGH = 0.10   
     PRICE_NEGATIVE = 0.0          
 
     for i in range(n):
         net_load = net_load_arr[i]
-        
-        current_price = price_arr[i] # Sekarang membaca Tariff Export matang
         is_off_peak = is_offpeak_arr[i]
         is_peak = is_peak_arr[i]
         is_shoulder = is_shoulder_arr[i]
@@ -60,9 +59,9 @@ def simulate_battery_numba(
             target_power = max_dis_kw
             
         # ---------------------------------------------------------
-        # 2. PRIORITAS KEDUA: VPP CHARGE (Harga Minus)
+        # 2. PRIORITAS KEDUA: VPP CHARGE (Pakai Spot Market Murni)
         # ---------------------------------------------------------
-        elif current_price < PRICE_NEGATIVE:
+        elif spot_price_arr[i] < PRICE_NEGATIVE:
             target_power = -max_chg_kw
             
         # ---------------------------------------------------------
@@ -93,8 +92,9 @@ def simulate_battery_numba(
         # 4. SKEMA WHOLESALE PRICE
         # ---------------------------------------------------------
         elif tariff_mode_int == 2:
-            if current_price <= PRICE_WHOLESALE_CHEAP:
-                if current_kwh < target_soc_kwh:
+            # SEMI CHARGE: Sekarang diubah pakai tariff_import_arr (Sesuai konsepmu)
+            if tariff_import_arr[i] <= PRICE_WHOLESALE_CHEAP: # <= 0.05
+                if current_kwh < target_soc_kwh: # Kejar target 30%
                     if net_load < 0:
                         # ADA excess matahari: Murni pakai matahari saja, DILARANG beli tambahan dari grid
                         target_power = net_load
@@ -106,13 +106,15 @@ def simulate_battery_numba(
                     # Sudah 30% ke atas: Hanya terima excess matahari, tidak beli grid
                     target_power = net_load if net_load < 0 else 0.0
             
-            elif current_price >= PRICE_WHOLESALE_HIGH:
-                # Boleh discharge. 
+            # DISCHARGE: Tetap pakai tariff_import_arr
+            elif tariff_import_arr[i] >= PRICE_WHOLESALE_HIGH: # >= 0.10
                 target_power = net_load
                 
+            # IDLE (DIAM): Otomatis terbentuk jika harga di antara 0.05 dan 0.10
             else:
                 # BATERAI DIAM (0.0). Rumah murni pakai listrik Grid jika tidak ada matahari.
                 target_power = net_load if net_load < 0 else 0.0
+
         # ---------------------------------------------------------
         # 5. SKEMA FLAT (Baseline Normal)
         # ---------------------------------------------------------
@@ -120,7 +122,7 @@ def simulate_battery_numba(
             # Apapun jamnya, prioritas utama: Solar -> Baterai -> Grid
             target_power = net_load
                 
-        # --- FISIKA BATERAI (JANGAN DIUBAH) ---
+        # --- FISIKA BATERAI ---
         target_power = max(-max_chg_kw, min(max_dis_kw, target_power))
         real_power = 0.0
         
@@ -221,13 +223,12 @@ def get_time_mask(time_float_arr, start_t, end_t):
 
 
 def run_simulation(df, params):
-    
+
     arr_irr = df['irradiance'].to_numpy(dtype=np.float64)
     arr_temp = df['temperature'].to_numpy(dtype=np.float64)
     arr_load = df['load_profile'].to_numpy(dtype=np.float64)
     
-    # Hitung Solar Output 
-    temp_factor = 1 + (params['temp_coeff'] * (arr_temp))
+    temp_factor = 1 + (params['temp_coeff'] * arr_temp)
     solar_kw = params['solar_capacity_kw'] * (arr_irr / 1000.0) * temp_factor * params['pr']
     solar_kw = np.maximum(solar_kw, 0.0) 
     
@@ -238,9 +239,8 @@ def run_simulation(df, params):
     if 'price_import' in df_res.columns:
         df_res.rename(columns={'price_import': 'price_profile'}, inplace=True)
 
-    # -------------------------------------------------------------
-    # 2. Hitung Tarif Ekspor & Impor (Dipindah ke atas)
-    # -------------------------------------------------------------
+    # price_profile bertipe AUD/MWh, dibagi 1000 agar menjadi AUD/kWh
+    arr_spot_kwh = df_res['price_profile'].to_numpy(dtype=np.float64) / 1000.0
     scheme = params.get('tariff_scheme', 'Flat')
     
     if scheme == 'Wholesale Price': 
@@ -271,35 +271,37 @@ def run_simulation(df, params):
             df_res['tariff_export_AUD'] = 0.0
         
     elif scheme == 'Time of Use':
-        p_start = params['t_peak_start'].hour
-        p_end = params['t_peak_end'].hour
-        s_start = params['t_shoulder_start'].hour
-        s_end = params['t_shoulder_end'].hour
-        
-        hours = df_res['timestamp'].dt.hour
-        
-        def get_mask(h_array, start, end):
-            if start < end:
-                return (h_array >= start) & (h_array < end)
-            elif start > end:
-                return (h_array >= start) | (h_array < end)
+        # Gunakan time_float (jam + menit/60) supaya konsisten dengan get_time_mask() di baterai
+        timestamps_local = df_res['timestamp']
+        time_float_tariff = (timestamps_local.dt.hour + timestamps_local.dt.minute / 60.0).to_numpy(dtype=np.float64)
+
+        p_start_f = params['t_peak_start'].hour + params['t_peak_start'].minute / 60.0
+        p_end_f   = params['t_peak_end'].hour   + params['t_peak_end'].minute   / 60.0
+        s_start_f = params['t_shoulder_start'].hour + params['t_shoulder_start'].minute / 60.0
+        s_end_f   = params['t_shoulder_end'].hour   + params['t_shoulder_end'].minute   / 60.0
+
+        def _mask_float(arr, s, e):
+            if s < e:
+                return (arr >= s) & (arr < e)
+            elif s > e:
+                return (arr >= s) | (arr < e)
             else:
-                return pd.Series(False, index=h_array.index)
-        
-        cond_peak = get_mask(hours, p_start, p_end)
-        cond_shoulder = get_mask(hours, s_start, s_end)
-        
+                return np.zeros(len(arr), dtype=bool)
+
+        cond_peak     = _mask_float(time_float_tariff, p_start_f, p_end_f)
+        cond_shoulder = _mask_float(time_float_tariff, s_start_f, s_end_f)
+
         # Eksekusi Numpy Select untuk IMPORT
         df_res['tariff_import_AUD'] = np.select(
-            [cond_peak, cond_shoulder], 
-            [params['peak_price'], params['shoulder_price']], 
+            [cond_peak, cond_shoulder],
+            [params['peak_price'], params['shoulder_price']],
             default=params['offpeak_price']
         )
-        
+
         # Eksekusi Numpy Select untuk EXPORT
         df_res['tariff_export_AUD'] = np.select(
-            [cond_peak, cond_shoulder], 
-            [params.get('exp_peak', 0.0), params.get('exp_shoulder', 0.0)], 
+            [cond_peak, cond_shoulder],
+            [params.get('exp_peak', 0.0), params.get('exp_shoulder', 0.0)],
             default=params.get('exp_offpeak', 0.0)
         )
         
@@ -324,9 +326,6 @@ def run_simulation(df, params):
     vpp_thresh = params['dispatch_price_threshold']
     is_vpp_arr = arr_price_raw >= vpp_thresh
     
-    arr_price_export = df_res['tariff_export_AUD'].to_numpy(dtype=np.float64)
-    
-    # 3. Konversi Nama Skema
     scheme_name = params.get('tariff_scheme', 'Flat')
     if scheme_name == 'Time of Use':
         tariff_mode_int = 1
@@ -335,10 +334,12 @@ def run_simulation(df, params):
     else:
         tariff_mode_int = 0
         
-    # --- 4. Kalkulasi Baterai (Melempar arr_price_export yang sudah ada Market Fee) ---
+    arr_tariff_import = df_res['tariff_import_AUD'].to_numpy(dtype=np.float64)
+
     soc_pct, bat_power = simulate_battery_numba(
         net_load_pure,
-        arr_price_export,
+        arr_spot_kwh,       
+        arr_tariff_import,   
         is_offpeak,
         is_peak,         
         is_shoulder,      
@@ -371,45 +372,49 @@ def run_simulation(df, params):
     # FINALISASI KALKULASI & EKONOMI VPP
     # =====================================================================
     dt_hours = 5.0 / 60.0
-    
-    # 1. Aliran Daya Dasar
+
+    # 1. Aliran Daya Dasar — dihitung dari nilai presisi penuh (belum di-round)
     df_res['grid_import_kw'] = np.where(df_res['grid_net_kw'] > 0, df_res['grid_net_kw'], 0)
     df_res['grid_export_kw'] = np.where(df_res['grid_net_kw'] < 0, -df_res['grid_net_kw'], 0)
     df_res['vpp_charge'] = arr_price_raw < 0
-    
+
     # 2. Akuntansi VPP Discharge
-    df_res['vpp_battery_discharge_kw'] = np.where(df_res['vpp_status'] > 0, np.where(df_res['battery_power_ac_kw'] > 0, df_res['battery_power_ac_kw'], 0), 0)
+    df_res['vpp_battery_discharge_kw'] = np.where(
+        df_res['vpp_status'] > 0,
+        np.where(df_res['battery_power_ac_kw'] > 0, df_res['battery_power_ac_kw'], 0),
+        0
+    )
     df_res['vpp_grid_export_kw'] = np.where(df_res['vpp_status'] > 0, df_res['grid_export_kw'], 0)
-    
+
     # 3. Kalkulasi Extra Import Menggunakan Numba (Sangat Cepat)
     arr_soc_kwh = df_res['battery_soc_kwh'].to_numpy()
     arr_extra_import = calculate_extra_import_numba(
-        df_res['vpp_status'].to_numpy() > 0, 
-        df_res['battery_power_ac_kw'].to_numpy(), 
-        df_res['grid_net_kw'].to_numpy(), 
-        arr_soc_kwh, 
+        df_res['vpp_status'].to_numpy() > 0,
+        df_res['battery_power_ac_kw'].to_numpy(),
+        df_res['grid_net_kw'].to_numpy(),
+        arr_soc_kwh,
         dt_hours
     )
     df_res['vpp_grid_import_after_discharge_kw'] = arr_extra_import
 
-    # 4. Kalkulasi Ekonomi (Financials)
-    tariff_import = df_res.get('tariff_import_AUD', 0.20)
-    tariff_export = df_res.get('tariff_export_AUD', 0.08)
-    
+    # 4. Kalkulasi Ekonomi (Financials) — semua pakai nilai presisi penuh
+    tariff_import = df_res['tariff_import_AUD']
+    tariff_export = df_res['tariff_export_AUD']
+
     df_res['vpp_export_value_AUD'] = (df_res['vpp_grid_export_kw'] * dt_hours) * tariff_export
     df_res['vpp_extra_import_cost_AUD'] = (df_res['vpp_grid_import_after_discharge_kw'] * dt_hours) * tariff_import
     df_res['vpp_operational_net_value_AUD'] = df_res['vpp_export_value_AUD'] - df_res['vpp_extra_import_cost_AUD']
-    
+
     # 5. Kalkulasi Perbandingan Tagihan (Bill Comparison)
     df_res['bill_actual'] = (df_res['grid_import_kw'] * dt_hours * tariff_import) - (df_res['grid_export_kw'] * dt_hours * tariff_export)
-    
+
     # Skenario Solar Only
     col_load = 'load_profile' if 'load_profile' in df_res.columns else 'beban_rumah_kw'
     net_solar_only = df_res[col_load] - df_res['solar_output_kw']
     import_solar = np.where(net_solar_only > 0, net_solar_only, 0)
     export_solar = np.where(net_solar_only < 0, -net_solar_only, 0)
     df_res['bill_solar_only'] = (import_solar * dt_hours * tariff_import) - (export_solar * dt_hours * tariff_export)
-    
+
     # Skenario Grid Only
     df_res['bill_grid_only'] = (df_res[col_load] * dt_hours) * tariff_import
 
@@ -417,26 +422,45 @@ def run_simulation(df, params):
     # DAFTAR KOLOM FINAL (FINAL COLS)
     # =====================================================================
     final_cols = [
-        'timestamp', 'irradiance', 'temperature', 'load_profile', 'price_profile', 
-        'solar_output_kw', 'battery_soc_pct', 'battery_soc_kwh', 'battery_power_ac_kw', 
+        'timestamp', 'irradiance', 'temperature', 'load_profile', 'price_profile',
+        'solar_output_kw', 'battery_soc_pct', 'battery_soc_kwh', 'battery_power_ac_kw',
         'grid_net_kw', 'tariff_import_AUD', 'tariff_export_AUD',
         'vpp_status', 'vpp_charge', 'grid_import_kw', 'grid_export_kw',
         'vpp_battery_discharge_kw', 'vpp_grid_export_kw', 'vpp_grid_import_after_discharge_kw',
         'vpp_export_value_AUD', 'vpp_extra_import_cost_AUD', 'vpp_operational_net_value_AUD',
         'bill_actual', 'bill_solar_only', 'bill_grid_only'
     ]
-    
-    avail_cols = [c for c in final_cols if c in df_res.columns]
 
+    avail_cols = [c for c in final_cols if c in df_res.columns]
     df_export = df_res[avail_cols].copy()
-    
-    tariff_cols = ['tariff_import_AUD', 'tariff_export_AUD']
+
+    # =====================================================================
+    # ROUNDING AKHIR — dilakukan SETELAH semua kalkulasi selesai
+    # =====================================================================
+    tariff_cols        = ['tariff_import_AUD', 'tariff_export_AUD']
+    bool_cols          = ['vpp_status', 'vpp_charge']
+    monetary_bill_cols = [
+        'bill_actual', 'bill_solar_only', 'bill_grid_only',
+        'vpp_export_value_AUD', 'vpp_extra_import_cost_AUD', 'vpp_operational_net_value_AUD'
+    ]
+
     for c in tariff_cols:
         if c in df_export.columns:
             df_export[c] = df_export[c].round(5)
-            
-    other_cols = [c for c in df_export.columns if c not in tariff_cols and c != 'timestamp']
+
+    for c in monetary_bill_cols:
+        if c in df_export.columns:
+            df_export[c] = df_export[c].round(6)
+
+    other_cols = [
+        c for c in df_export.columns
+        if c not in tariff_cols
+        and c not in bool_cols
+        and c not in monetary_bill_cols
+        and c != 'timestamp'
+    ]
     for c in other_cols:
-        df_export[c] = df_export[c].round(2)
-        
+        if pd.api.types.is_numeric_dtype(df_export[c]):
+            df_export[c] = df_export[c].round(2)
+
     return df_export
