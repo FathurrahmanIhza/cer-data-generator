@@ -55,12 +55,13 @@ def time_encoder(obj):
         return obj.strftime("%H:%M")
     raise TypeError("Type not serializable")
 
-def load_config_history():
+def load_config_history(assignment_type="assignment_1"):
+    """Mengambil 10 config terakhir dari Supabase, difilter per assignment."""
     try:
-        
         response = supabase.table(TAB_CONFIG)\
             .select("*")\
             .neq("Config_Name", "")\
+            .eq("assignment_type", assignment_type)\
             .order("id", desc=True)\
             .limit(10)\
             .execute()
@@ -68,14 +69,48 @@ def load_config_history():
         df_history = pd.DataFrame(response.data)
         return df_history
     except Exception as e:
-        st.error(f"⚠️ Failed to Read Config History from Supabase: {e}")
+        st.error(f"⚠️ Failed to read config history from Supabase: {e}")
         return pd.DataFrame()
 
+def get_latest_config_for_assignment(assignment_type="assignment_1"):
+    """
+    Ambil config terbaru untuk assignment tertentu.
+    Dipanggil saat admin switch assignment agar config langsung ter-load.
+    Fallback: jika tidak ada config untuk assignment yang diminta,
+              pakai config assignment_1 terbaru.
+    """
+    try:
+        response = supabase.table(TAB_CONFIG)\
+            .select("*")\
+            .eq("assignment_type", assignment_type)\
+            .order("id", desc=True)\
+            .limit(1)\
+            .execute()
+        
+        if response.data:
+            return pd.Series(response.data[0])
+
+        if assignment_type != "assignment_1":
+            fallback = supabase.table(TAB_CONFIG)\
+                .select("*")\
+                .eq("assignment_type", "assignment_1")\
+                .order("id", desc=True)\
+                .limit(1)\
+                .execute()
+            if fallback.data:
+                return pd.Series(fallback.data[0])
+
+        return None
+    except Exception:
+        return None
+
 def save_config_to_sheets(config_name, current_state):
+    """Simpan konfigurasi admin ke Supabase, termasuk assignment_type aktif."""
     try:
         new_row = {
             "Timestamp": datetime.now().strftime("%Y-%m-%d %H:%M:%S"),
             "Config_Name": config_name,
+            "assignment_type": current_state.get("active_assignment", "assignment_1"),
             "use_rand_duration": current_state.get("chk_dur", False),
             "rand_dur_years": current_state.get("rand_dur_years", 1),
             "start_year": current_state.get("date_start", 2020),
@@ -124,7 +159,7 @@ def save_config_to_sheets(config_name, current_state):
         st.cache_data.clear()
         return True
     except Exception as e:
-        st.error(f"⚠️ Failed to Save Config: {e}")
+        st.error(f"⚠️ Failed to save config: {e}")
         return False
     
 def apply_row_to_session(selected_row):

@@ -222,7 +222,8 @@ def get_time_mask(time_float_arr, start_t, end_t):
         return (time_float_arr >= s_val) | (time_float_arr < e_val)
 
 
-def run_simulation(df, params):
+def run_simulation_full(df, params):
+    """Engine simulasi Assignment 1: Solar PV + Battery + Grid + VPP."""
 
     arr_irr = df['irradiance'].to_numpy(dtype=np.float64)
     arr_temp = df['temperature'].to_numpy(dtype=np.float64)
@@ -464,3 +465,110 @@ def run_simulation(df, params):
             df_export[c] = df_export[c].round(2)
 
     return df_export
+
+
+def run_simulation_solar_only(df, params):
+    """Engine simulasi Assignment 2: Solar PV Only — tanpa baterai, tanpa VPP dispatch."""
+
+    arr_irr  = df['irradiance'].to_numpy(dtype=np.float64)
+    arr_temp = df['temperature'].to_numpy(dtype=np.float64)
+    arr_load = df['load_profile'].to_numpy(dtype=np.float64)
+
+    temp_factor = 1 + (params['temp_coeff'] * arr_temp)
+    solar_kw = params['solar_capacity_kw'] * (arr_irr / 1000.0) * temp_factor * params['pr']
+    solar_kw = np.maximum(solar_kw, 0.0)
+
+    df_res = df.copy()
+    if 'price_import' in df_res.columns:
+        df_res.rename(columns={'price_import': 'price_profile'}, inplace=True)
+
+    scheme = params.get('tariff_scheme', 'Flat')
+
+    if scheme == 'Wholesale Price':
+        df_fees = params.get('df_wholesale_fees', pd.DataFrame())
+        if 'price_profile' in df_res.columns and not df_fees.empty:
+            spot_kwh = df_res['price_profile'] / 1000.0
+            years  = df_res['timestamp'].dt.year
+            months = df_res['timestamp'].dt.month
+            fy_start_yr = np.where(months >= 7, years, years - 1)
+            fy_str = (pd.Series(fy_start_yr) % 100).astype(str).str.zfill(2) + '/' + \
+                     ((pd.Series(fy_start_yr) + 1) % 100).astype(str).str.zfill(2)
+            m_map = df_fees.set_index('FY_Year')['Market_Fee'].to_dict()
+            n_map = df_fees.set_index('FY_Year')['Network_Fee'].to_dict()
+            o_map = df_fees.set_index('FY_Year')['Other_Fee'].to_dict()
+            m_fee = fy_str.map(m_map).fillna(0).values
+            n_fee = fy_str.map(n_map).fillna(0).values
+            o_fee = fy_str.map(o_map).fillna(0).values
+            df_res['tariff_import_AUD'] = spot_kwh + m_fee + n_fee + o_fee
+            df_res['tariff_export_AUD'] = spot_kwh + m_fee
+        else:
+            df_res['tariff_import_AUD'] = 0.0
+            df_res['tariff_export_AUD'] = 0.0
+
+    elif scheme == 'Time of Use':
+        timestamps_local = df_res['timestamp']
+        time_float_tariff = (timestamps_local.dt.hour + timestamps_local.dt.minute / 60.0).to_numpy(dtype=np.float64)
+        p_start_f = params['t_peak_start'].hour + params['t_peak_start'].minute / 60.0
+        p_end_f   = params['t_peak_end'].hour   + params['t_peak_end'].minute   / 60.0
+        s_start_f = params['t_shoulder_start'].hour + params['t_shoulder_start'].minute / 60.0
+        s_end_f   = params['t_shoulder_end'].hour   + params['t_shoulder_end'].minute   / 60.0
+
+        def _mask_float(arr, s, e):
+            if s < e:   return (arr >= s) & (arr < e)
+            elif s > e: return (arr >= s) | (arr < e)
+            else:       return np.zeros(len(arr), dtype=bool)
+
+        cond_peak     = _mask_float(time_float_tariff, p_start_f, p_end_f)
+        cond_shoulder = _mask_float(time_float_tariff, s_start_f, s_end_f)
+        df_res['tariff_import_AUD'] = np.select(
+            [cond_peak, cond_shoulder],
+            [params['peak_price'], params['shoulder_price']],
+            default=params['offpeak_price']
+        )
+        df_res['tariff_export_AUD'] = np.select(
+            [cond_peak, cond_shoulder],
+            [params.get('exp_peak', 0.0), params.get('exp_shoulder', 0.0)],
+            default=params.get('exp_offpeak', 0.0)
+        )
+    else:  # Flat
+        df_res['tariff_import_AUD'] = params['import_flat']
+        df_res['tariff_export_AUD'] = params['export_price']
+
+    # Grid net sederhana: load - solar (tanpa baterai)
+    df_res['solar_output_kw'] = solar_kw
+    df_res['grid_net_kw']     = arr_load - solar_kw
+
+    df_res['grid_import_kw'] = np.where(df_res['grid_net_kw'] > 0, df_res['grid_net_kw'], 0)
+    df_res['grid_export_kw'] = np.where(df_res['grid_net_kw'] < 0, -df_res['grid_net_kw'], 0)
+
+    final_cols = [
+        'timestamp', 'irradiance', 'temperature', 'load_profile',
+        'price_profile', 'solar_output_kw', 'grid_net_kw',
+        'grid_import_kw', 'grid_export_kw',
+        'tariff_import_AUD', 'tariff_export_AUD',
+    ]
+    avail_cols = [c for c in final_cols if c in df_res.columns]
+    df_export  = df_res[avail_cols].copy()
+
+    # Rounding
+    tariff_cols = ['tariff_import_AUD', 'tariff_export_AUD']
+    for c in tariff_cols:
+        if c in df_export.columns:
+            df_export[c] = df_export[c].round(5)
+    other_cols = [c for c in df_export.columns if c not in tariff_cols and c != 'timestamp']
+    for c in other_cols:
+        if pd.api.types.is_numeric_dtype(df_export[c]):
+            df_export[c] = df_export[c].round(2)
+
+    return df_export
+
+
+def run_simulation(df, params, assignment_type="assignment_1"):
+    """
+    Dispatcher utama. Pilih engine kalkulasi berdasarkan assignment_type.
+    Tambahkan elif baru di sini jika ada Assignment 3, 4, dst.
+    """
+    if assignment_type == "assignment_2":
+        return run_simulation_solar_only(df, params)
+    else:
+        return run_simulation_full(df, params)

@@ -6,7 +6,7 @@ import numpy as np
 import calendar
 import pandas as pd
 
-def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
+def plot_annual_overview(df_vis_year, col_bat, selected_vis_year, show_battery=True):
     DT_HOURS = 5.0 / 60.0
 
     df_calc = df_vis_year.copy()
@@ -110,6 +110,11 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
     factor = DT_HOURS
     
     # --- ROW 1 Prep ---
+    if 'battery_discharge_kwh' not in monthly.columns:
+        monthly['battery_discharge_kwh'] = 0.0
+    if 'grid_import_kwh' not in monthly.columns:
+        monthly['grid_import_kwh'] = 0.0
+
     elec_cols = ["solar_output_kwh", "battery_discharge_kwh", "grid_import_kwh"]
     monthly_pct = (monthly[elec_cols].div(monthly[elec_cols].sum(axis=1), axis=0) * 100)
 
@@ -202,8 +207,11 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
     with c1:
         fig1, ax1 = plt.subplots(figsize=(6.5, 4.2))
         ax1.bar(months_labels, monthly['solar_output_kwh'], color=colors_src[0], label=labels_src[0], width=0.8)
-        ax1.bar(months_labels, monthly['battery_discharge_kwh'], bottom=monthly['solar_output_kwh'], color=colors_src[1], label=labels_src[1], width=0.8)
-        ax1.bar(months_labels, monthly['grid_import_kwh'], bottom=monthly['solar_output_kwh']+monthly['battery_discharge_kwh'], color=colors_src[2], label=labels_src[2], width=0.8)
+        if show_battery:
+            ax1.bar(months_labels, monthly['battery_discharge_kwh'], bottom=monthly['solar_output_kwh'], color=colors_src[1], label=labels_src[1], width=0.8)
+            ax1.bar(months_labels, monthly['grid_import_kwh'], bottom=monthly['solar_output_kwh']+monthly['battery_discharge_kwh'], color=colors_src[2], label=labels_src[2], width=0.8)
+        else:
+            ax1.bar(months_labels, monthly['grid_import_kwh'], bottom=monthly['solar_output_kwh'], color=colors_src[2], label=labels_src[2], width=0.8)
         ax1.plot(months_labels, monthly['load_kwh'], color="black", marker="o", linewidth=2.5, label="Load")
         
         ax1.set_title("Monthly Energy Contributions vs Load (kWh)")
@@ -229,8 +237,11 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
     with c2:
         fig2, ax2 = plt.subplots(figsize=(6.5, 4.2))
         ax2.bar(months_labels, monthly_pct['solar_output_kwh'], color=colors_src[0], label=labels_src[0], width=0.8)
-        ax2.bar(months_labels, monthly_pct['battery_discharge_kwh'], bottom=monthly_pct['solar_output_kwh'], color=colors_src[1], label=labels_src[1], width=0.8)
-        ax2.bar(months_labels, monthly_pct['grid_import_kwh'], bottom=monthly_pct['solar_output_kwh']+monthly_pct['battery_discharge_kwh'], color=colors_src[2], label=labels_src[2], width=0.8)
+        if show_battery:
+            ax2.bar(months_labels, monthly_pct['battery_discharge_kwh'], bottom=monthly_pct['solar_output_kwh'], color=colors_src[1], label=labels_src[1], width=0.8)
+            ax2.bar(months_labels, monthly_pct['grid_import_kwh'], bottom=monthly_pct['solar_output_kwh']+monthly_pct['battery_discharge_kwh'], color=colors_src[2], label=labels_src[2], width=0.8)
+        else:
+            ax2.bar(months_labels, monthly_pct['grid_import_kwh'], bottom=monthly_pct['solar_output_kwh'], color=colors_src[2], label=labels_src[2], width=0.8)
         ax2.set_title("Monthly Energy Contributions (%)")
         ax2.set_ylabel("Percentage (%)"); ax2.set_xlabel("Month")
         ax2.set_ylim(0, 100)
@@ -298,52 +309,54 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
         st.divider()
 
     # ============================================================
-    # ROW 5: Monthly Self Consumption, Sufficiency, PV Gen & VPP 
+    # ROW 5: Monthly Self Consumption, Sufficiency, PV Gen & VPP
+    # (hanya ditampilkan untuk Assignment 1 / show_battery=True)
     # ============================================================
-    fig_ss, ax1_ss = plt.subplots(figsize=(14, 4))
-    x_m = np.arange(len(months_labels))
-    ax1_ss.plot(x_m, monthly["self_consumption_pct"], marker="o", linewidth=2, label="PV Self-Consumption")
-    ax1_ss.plot(x_m, monthly["self_sufficiency_pct"], marker="s", linewidth=2, label="Home Self-Sufficiency")
-    ax1_ss.set_ylabel("Percentage (%)")
-    ax1_ss.set_ylim(0, 110)
-    ax1_ss.set_xticks(x_m); ax1_ss.set_xticklabels(months_labels); ax1_ss.set_xlabel("Month")
-    ax1_ss.axvspan(4.5, 6.5, color="grey", alpha=0.18, label="High VPP Activity Period")
-    
-    ax2_ss = ax1_ss.twinx()
-    bar_width = 0.35
-    
-    ax2_ss.bar(
-        x_m - bar_width/2, 
-        monthly["solar_output_kwh"], 
-        alpha=0.4, 
-        color="orange", 
-        width=bar_width, 
-        label="PV Generation"
-    )
-    
-    _vpp_bar_data = monthly["vpp_bat_dis_kwh_tmp"] if "vpp_bat_dis_kwh_tmp" in monthly.columns else pd.Series(0, index=monthly.index)
-    ax2_ss.bar(
-        x_m + bar_width/2, 
-        _vpp_bar_data, 
-        alpha=0.6, 
-        color="red", 
-        width=bar_width, 
-        label="VPP Discharge"
-    )
-    
-    ax2_ss.set_ylabel("Energy (kWh)")
-    
-    lines1_ss, labels1_ss = ax1_ss.get_legend_handles_labels()
-    lines2_ss, labels2_ss = ax2_ss.get_legend_handles_labels()
-    ax1_ss.legend(lines1_ss + lines2_ss, labels1_ss + labels2_ss, loc="lower left", fontsize='small')
-    
-    ax1_ss.set_title("Monthly Self-Consumption, Self-Sufficiency, PV Generation, and VPP Dispatch Activity")
-    ax1_ss.grid(alpha=0.3); ax1_ss.margins(x=0.02)
-    
-    plt.tight_layout()
-    st.pyplot(fig_ss)
-    plt.close(fig_ss)
-    st.divider()
+    if show_battery:
+        fig_ss, ax1_ss = plt.subplots(figsize=(14, 4))
+        x_m = np.arange(len(months_labels))
+        ax1_ss.plot(x_m, monthly["self_consumption_pct"], marker="o", linewidth=2, label="PV Self-Consumption")
+        ax1_ss.plot(x_m, monthly["self_sufficiency_pct"], marker="s", linewidth=2, label="Home Self-Sufficiency")
+        ax1_ss.set_ylabel("Percentage (%)")
+        ax1_ss.set_ylim(0, 110)
+        ax1_ss.set_xticks(x_m); ax1_ss.set_xticklabels(months_labels); ax1_ss.set_xlabel("Month")
+        ax1_ss.axvspan(4.5, 6.5, color="grey", alpha=0.18, label="High VPP Activity Period")
+        
+        ax2_ss = ax1_ss.twinx()
+        bar_width = 0.35
+        
+        ax2_ss.bar(
+            x_m - bar_width/2, 
+            monthly["solar_output_kwh"], 
+            alpha=0.4, 
+            color="orange", 
+            width=bar_width, 
+            label="PV Generation"
+        )
+        
+        _vpp_bar_data = monthly["vpp_bat_dis_kwh_tmp"] if "vpp_bat_dis_kwh_tmp" in monthly.columns else pd.Series(0, index=monthly.index)
+        ax2_ss.bar(
+            x_m + bar_width/2, 
+            _vpp_bar_data, 
+            alpha=0.6, 
+            color="red", 
+            width=bar_width, 
+            label="VPP Discharge"
+        )
+        
+        ax2_ss.set_ylabel("Energy (kWh)")
+        
+        lines1_ss, labels1_ss = ax1_ss.get_legend_handles_labels()
+        lines2_ss, labels2_ss = ax2_ss.get_legend_handles_labels()
+        ax1_ss.legend(lines1_ss + lines2_ss, labels1_ss + labels2_ss, loc="lower left", fontsize='small')
+        
+        ax1_ss.set_title("Monthly Self-Consumption, Self-Sufficiency, PV Generation, and VPP Dispatch Activity")
+        ax1_ss.grid(alpha=0.3); ax1_ss.margins(x=0.02)
+        
+        plt.tight_layout()
+        st.pyplot(fig_ss)
+        plt.close(fig_ss)
+        st.divider()
 
     # ============================================================
     # ROW 6: Request vs Actual Dispatch | Battery Breakdown 
@@ -407,7 +420,7 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
             line2, = ax_econ.plot(x_pos, monthly["vpp_extra_import_cost_AUD"], marker="o", linestyle="-", linewidth=2)
             line3, = ax_econ.plot(x_pos, monthly["vpp_export_value_AUD"], color="orange", marker="s", linestyle="-", linewidth=2)
             
-            
+            # 2. Simpan handle untuk Dummy Bars (akan ditaruh di Kanan)
             bar1 = ax_econ.bar(np.nan, np.nan, color="#55A868")
             bar2 = ax_econ.bar(np.nan, np.nan, color="#DD8452")
             bar3 = ax_econ.bar(np.nan, np.nan, color="#C44E52")
@@ -417,22 +430,29 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year):
             ax_econ.set_ylabel("Value ($)")
             ax_econ.set_title("Monthly VPP Export Value vs Extra Import Cost")
             
+            # ============================================================
+            # PROSES MEMECAH LEGEND
+            # ============================================================
+            
+            # Legend 1: Sisi Kiri (Upper Left) - Untuk Line data
             legend_left = ax_econ.legend(
                 handles=[line1, line2, line3],
                 labels=["VPP Payment", "Extra Import Cost ($)", "VPP Export Value ($)"],
                 fontsize='small', 
                 loc='upper left'
             )
-            
+            # Kunci utama: tambahkan legend pertama ke grafik agar tidak terhapus
             ax_econ.add_artist(legend_left)
             
-            
+            # Legend 2: Sisi Kanan (Upper Right) - Untuk Keterangan Warna Bar
             ax_econ.legend(
                 handles=[bar1, bar2, bar3],
                 labels=["Net Cost Negative", "Net Cost Positive", "Net Cost > VPP Subscription"],
                 fontsize='small', 
                 loc='upper right'
             )
+            
+            # ============================================================
             
             ax_econ.grid(axis='y', linestyle='--', alpha=0.5)
             ax_econ.margins(x=0.02)
@@ -532,7 +552,8 @@ def plot_monthly_analysis(df_vis_month, col_load, selected_month_name, selected_
     vpp_charge = df_m_calc['vpp_charge'] if 'vpp_charge' in df_m_calc.columns else pd.Series(False, index=df_m_calc.index)
 
     # RENDER AREA MONTHLY
-    fig_h_sol, ax_hs = plt.subplots(figsize=(14, 4))
+    # --- CHART 1: Irradiance Heatmap (Kompensasi Tinggi) ---
+    fig_h_sol, ax_hs = plt.subplots(figsize=(14, 5))
     im_sol = ax_hs.imshow(solar_matrix.to_numpy(), cmap='YlOrRd', aspect='auto', interpolation='nearest', origin='lower')
     ax_hs.set_xlabel("Day"); ax_hs.set_ylabel("Hour"); ax_hs.set_title(f"Irradiance Heatmap - {selected_month_name}")
     ax_hs.set_xticks(np.arange(0, days_in_month)); ax_hs.set_xticklabels(np.arange(1, days_in_month + 1))
@@ -541,8 +562,9 @@ def plot_monthly_analysis(df_vis_month, col_load, selected_month_name, selected_
 
     st.divider()
 
-    # --- CHART 2: Monthly Scrollable Battery Operation ---
-    fig_bat, ax1 = plt.subplots(figsize=(18, 5))
+    # --- CHART 2: Monthly Scrollable Battery Operation (Kompensasi Tinggi Ekstrem) ---
+   
+    fig_bat, ax1 = plt.subplots(figsize=(24, 8.5))
     ax1.plot(hourly_sample.index, hourly_sample["solar_output_kwh"], label="PV Generation", linewidth=1.2)
     ax1.plot(hourly_sample.index, hourly_sample["load_kwh"], label="Load", linewidth=1.2)
     ax1.plot(hourly_sample.index, hourly_sample["grid_import_kwh"], label="Grid Import", linewidth=1.2)
