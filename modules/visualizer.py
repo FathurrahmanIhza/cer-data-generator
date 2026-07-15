@@ -6,15 +6,28 @@ import numpy as np
 import calendar
 import pandas as pd
 
-def plot_annual_overview(df_vis_year, col_bat, selected_vis_year, show_battery=True):
+def plot_annual_overview(df_vis_year, col_bat, selected_vis_year, vis_config: dict = None):
+    # Default: tampilkan semua chart (perilaku Assignment 1)
+    if vis_config is None:
+        vis_config = {
+            "show_battery_charts":   True,
+            "show_vpp_charts":       True,
+            "show_monthly_analysis": True,
+            "show_row5":             True,
+        }
+    _show_bat = vis_config.get("show_battery_charts", True)
+    _show_vpp = vis_config.get("show_vpp_charts", True)
+    _show_row5 = vis_config.get("show_row5", True)
     DT_HOURS = 5.0 / 60.0
 
-    df_calc = df_vis_year.copy()
-    col_load = 'load_profile' if 'load_profile' in df_calc.columns else 'beban_rumah_kw'
+    col_load = 'load_profile' if 'load_profile' in df_vis_year.columns else 'beban_rumah_kw'
 
-    if not isinstance(df_calc.index, pd.DatetimeIndex):
-        df_calc = df_calc.set_index('timestamp')
+    if not isinstance(df_vis_year.index, pd.DatetimeIndex):
+        df_calc = df_vis_year.set_index('timestamp')
+    else:
+        df_calc = df_vis_year
 
+    df_calc = df_calc.copy()
     df_calc["month"] = df_calc.index.month
     df_calc["hour"]  = df_calc.index.hour
 
@@ -93,17 +106,22 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year, show_battery=T
 
     months_labels = [d.strftime("%b") for d in monthly.index]
 
-    df_hm = df_calc.copy()
-    df_hm['_month'] = df_hm.index.month
-    df_hm['_hour']  = df_hm.index.hour
-    if 'vpp_discharge_hours_raw' in df_hm.columns:
-        heatmap_vpp = df_hm.pivot_table(index='_month', columns='_hour', values='vpp_discharge_hours_raw', aggfunc='sum') \
-                           .reindex(index=range(1, 13), columns=range(24)).fillna(0)
+    _hm_month = df_calc.index.month
+    _hm_hour  = df_calc.index.hour
+    if 'vpp_discharge_hours_raw' in df_calc.columns:
+        heatmap_vpp = pd.pivot_table(
+            df_calc.assign(_month=_hm_month, _hour=_hm_hour),
+            index='_month', columns='_hour',
+            values='vpp_discharge_hours_raw', aggfunc='sum'
+        ).reindex(index=range(1, 13), columns=range(24)).fillna(0)
     else:
         heatmap_vpp = pd.DataFrame(0, index=range(1, 13), columns=range(24))
-    if 'extra_import_kwh_raw' in df_hm.columns:
-        heatmap_imp = df_hm.pivot_table(index='_month', columns='_hour', values='extra_import_kwh_raw', aggfunc='sum') \
-                           .reindex(index=range(1, 13), columns=range(24)).fillna(0)
+    if 'extra_import_kwh_raw' in df_calc.columns:
+        heatmap_imp = pd.pivot_table(
+            df_calc.assign(_month=_hm_month, _hour=_hm_hour),
+            index='_month', columns='_hour',
+            values='extra_import_kwh_raw', aggfunc='sum'
+        ).reindex(index=range(1, 13), columns=range(24)).fillna(0)
     else:
         heatmap_imp = pd.DataFrame(0, index=range(1, 13), columns=range(24))
 
@@ -207,7 +225,7 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year, show_battery=T
     with c1:
         fig1, ax1 = plt.subplots(figsize=(6.5, 4.2))
         ax1.bar(months_labels, monthly['solar_output_kwh'], color=colors_src[0], label=labels_src[0], width=0.8)
-        if show_battery:
+        if _show_bat:
             ax1.bar(months_labels, monthly['battery_discharge_kwh'], bottom=monthly['solar_output_kwh'], color=colors_src[1], label=labels_src[1], width=0.8)
             ax1.bar(months_labels, monthly['grid_import_kwh'], bottom=monthly['solar_output_kwh']+monthly['battery_discharge_kwh'], color=colors_src[2], label=labels_src[2], width=0.8)
         else:
@@ -237,7 +255,7 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year, show_battery=T
     with c2:
         fig2, ax2 = plt.subplots(figsize=(6.5, 4.2))
         ax2.bar(months_labels, monthly_pct['solar_output_kwh'], color=colors_src[0], label=labels_src[0], width=0.8)
-        if show_battery:
+        if _show_bat:
             ax2.bar(months_labels, monthly_pct['battery_discharge_kwh'], bottom=monthly_pct['solar_output_kwh'], color=colors_src[1], label=labels_src[1], width=0.8)
             ax2.bar(months_labels, monthly_pct['grid_import_kwh'], bottom=monthly_pct['solar_output_kwh']+monthly_pct['battery_discharge_kwh'], color=colors_src[2], label=labels_src[2], width=0.8)
         else:
@@ -310,9 +328,8 @@ def plot_annual_overview(df_vis_year, col_bat, selected_vis_year, show_battery=T
 
     # ============================================================
     # ROW 5: Monthly Self Consumption, Sufficiency, PV Gen & VPP
-    # (hanya ditampilkan untuk Assignment 1 / show_battery=True)
     # ============================================================
-    if show_battery:
+    if _show_row5:
         fig_ss, ax1_ss = plt.subplots(figsize=(14, 4))
         x_m = np.arange(len(months_labels))
         ax1_ss.plot(x_m, monthly["self_consumption_pct"], marker="o", linewidth=2, label="PV Self-Consumption")
