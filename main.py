@@ -729,6 +729,7 @@ if st.session_state['role'] == 'admin':
                                         'temperature':  'temperature_C',
                                         'load_profile': 'load_kW',
                                         'price_profile':'price_AUD/MWh',
+                                        'solar_output_kw': 'solar_output_kW',
                                     })
                                 else:
                                     df_export = df_result_regen.round(2).rename(columns={
@@ -736,6 +737,7 @@ if st.session_state['role'] == 'admin':
                                         'temperature':         'temperature_C',
                                         'load_profile':        'load_kW',
                                         'price_profile':       'price_AUD/MWh',
+                                        'solar_output_kw':     'solar_output_kW',
                                         'battery_soc_pct':     'battery_soc_%',
                                         'battery_soc_kwh':     'battery_soc_kwh',
                                         'battery_power_ac_kw': 'battery_power_ac_kW',
@@ -756,7 +758,8 @@ if st.session_state['role'] == 'admin':
                                     _ry_first = _df_regen_partial['timestamp'].dt.year.min()
                                     _ry_mask  = _df_regen_partial['timestamp'].dt.year > _ry_first
                                     _regen_blank = [
-                                        'solar_output_kw',
+                                        'solar_output_kW',
+                                        'spot_price_AUD/kWh',
                                         'tariff_import_flat_AUD/kWh', 'tariff_export_flat_AUD/kWh',
                                         'tariff_import_tou_AUD/kWh',  'tariff_export_tou_AUD/kWh',
                                     ]
@@ -1093,10 +1096,11 @@ if btn_run:
         if _asgn_for_csv == asgn.ASSIGNMENT_2:
             # Asgn 2: price_profile → price_AUD/MWh; spot_price_AUD/kWh sudah dari calculator
             _df_csv = df_result.copy().rename(columns={
-                'irradiance':    'irradiance_W/m^2',
-                'temperature':   'temperature_C',
-                'load_profile':  'load_kW',
-                'price_profile': 'price_AUD/MWh',
+                'irradiance':      'irradiance_W/m^2',
+                'temperature':     'temperature_C',
+                'load_profile':    'load_kW',
+                'price_profile':   'price_AUD/MWh',
+                'solar_output_kw': 'solar_output_kW',
             })
         else:
             # Asgn 1: rename map lama (termasuk tariff_import/export_AUD)
@@ -1105,6 +1109,7 @@ if btn_run:
                 'temperature':         'temperature_C',
                 'load_profile':        'load_kW',
                 'price_profile':       'price_AUD/MWh',
+                'solar_output_kw':     'solar_output_kW',
                 'battery_soc_pct':     'battery_soc_%',
                 'battery_power_ac_kw': 'battery_power_ac_kW',
                 'tariff_import_AUD':   'tariff_import_AUD/kWh',
@@ -1127,7 +1132,8 @@ if btn_run:
             _first_year = _df_partial['timestamp'].dt.year.min()
             _mask_later = _df_partial['timestamp'].dt.year > _first_year
             _blank_cols = [
-                'solar_output_kw',
+                'solar_output_kW',
+                'spot_price_AUD/kWh',
                 'tariff_import_flat_AUD/kWh', 'tariff_export_flat_AUD/kWh',
                 'tariff_import_tou_AUD/kWh',  'tariff_export_tou_AUD/kWh',
             ]
