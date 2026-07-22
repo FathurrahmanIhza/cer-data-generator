@@ -142,13 +142,36 @@ def load_and_merge_data(nama_lokasi, nama_titik, start_year, end_year, fixed_loa
 
             is_leap = calendar.isleap(year)
             
+            # Cek apakah base_irr adalah data multi-tahun (4 tahun = 420768 baris)
+            if len(base_irr) == 420768:
+                # Mapping rentang indeks cuaca 4 tahun (2022-2025)
+                year_ranges = {
+                    2022: (0, 105120),
+                    2023: (105120, 210240),
+                    2024: (210240, 315648), # Kabisat (366 hari)
+                    2025: (315648, 420768)
+                }
+                if year in year_ranges:
+                    start_idx, end_idx = year_ranges[year]
+                    curr_irr = base_irr[start_idx:end_idx]
+                    curr_temp = base_temp[start_idx:end_idx]
+                else:
+                    # Fallback jika tahun di luar range
+                    curr_irr = base_irr[:105120]
+                    curr_temp = base_temp[:105120]
+            else:
+                # Logika lama untuk data cuaca 1 tahun
+                if is_leap:
+                    curr_irr = np.concatenate([base_irr[:IDX_FEB_29_START], extra_irr, base_irr[IDX_FEB_29_START:]])
+                    curr_temp = np.concatenate([base_temp[:IDX_FEB_29_START], extra_temp, base_temp[IDX_FEB_29_START:]])
+                else:
+                    curr_irr = base_irr
+                    curr_temp = base_temp
+
+            # Load profile selalu 1 tahun, sehingga selalu menggunakan logika penyesuaian kabisat
             if is_leap:
-                curr_irr = np.concatenate([base_irr[:IDX_FEB_29_START], extra_irr, base_irr[IDX_FEB_29_START:]])
-                curr_temp = np.concatenate([base_temp[:IDX_FEB_29_START], extra_temp, base_temp[IDX_FEB_29_START:]])
                 curr_load = np.concatenate([base_load[:IDX_FEB_29_START], extra_load, base_load[IDX_FEB_29_START:]])
             else:
-                curr_irr = base_irr
-                curr_temp = base_temp
                 curr_load = base_load
 
             len_price = len(df_price)
