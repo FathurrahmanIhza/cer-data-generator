@@ -465,10 +465,10 @@ def run_simulation_full(df, params):
 
 
 def run_simulation_solar_only(df, params):
-    """Engine simulasi Assignment 2: Solar PV Only — tanpa baterai, tanpa VPP dispatch.
+    """Engine simulasi Assignment 2: Solar PV Only.
 
     Semua skema tariff (Flat, ToU, Spot/Wholesale) dihitung paralel sebagai kolom data tambahan.
-    Tariff TIDAK mempengaruhi simulasi (tidak ada battery/VPP dispatch di Assignment 2).
+    Jika parameter baterai tersedia (khusus Admin Full CSV), jalankan simulasi baterai Numba.
     """
 
     arr_irr  = df['irradiance'].to_numpy(dtype=np.float64)
@@ -483,7 +483,6 @@ def run_simulation_solar_only(df, params):
     if 'price_import' in df_res.columns:
         df_res.rename(columns={'price_import': 'price_profile'}, inplace=True)
 
-    # ── Grid net (solar only, no battery) ────────────────────────────
     df_res['solar_output_kw'] = solar_kw
     df_res['grid_net_kw']     = arr_load - solar_kw
     df_res['grid_import_kw']  = np.where(df_res['grid_net_kw'] > 0,  df_res['grid_net_kw'], 0)
@@ -526,11 +525,60 @@ def run_simulation_solar_only(df, params):
         default=params.get('exp_offpeak', 0.05)
     )
 
+    # ── Simulasi Baterai (jika parameter baterai disediakan) ─────────
+    if 'battery_capacity_kwh' in params and params['battery_capacity_kwh'] is not None and params['battery_capacity_kwh'] > 0:
+        bat_cap  = params['battery_capacity_kwh']
+        bat_eff  = params.get('battery_efficiency', 0.95)
+        init_soc = params.get('battery_initial_soc', 0.5)
+        soc_min  = params.get('soc_min_pct', 0.1)
+        soc_max  = params.get('soc_max_pct', 0.9)
+        max_chg  = params.get('max_charge_kw', 10.0)
+        max_dis  = params.get('max_discharge_kw', 10.0)
+
+        net_load_pure = arr_load - solar_kw
+
+        is_offpeak  = _mask_f(time_float_tariff, params['t_offpeak_start'].hour + params['t_offpeak_start'].minute/60.0, params['t_offpeak_end'].hour + params['t_offpeak_end'].minute/60.0)
+        is_peak     = cond_peak
+        is_shoulder = cond_shoulder
+
+        arr_price_raw = df_res['price_profile'].to_numpy(dtype=np.float64)
+        vpp_thresh    = params.get('dispatch_price_threshold', 800)
+        is_vpp_arr    = (arr_price_raw >= vpp_thresh) if vpp_thresh else np.zeros(len(df_res), dtype=bool)
+
+        arr_spot_kwh      = arr_price_raw / 1000.0
+        arr_tariff_import = df_res['tariff_import_flat_AUD/kWh'].to_numpy(dtype=np.float64)
+
+        soc_pct, bat_power = simulate_battery_numba(
+            net_load_pure,
+            arr_spot_kwh,
+            arr_tariff_import,
+            is_offpeak,
+            is_peak,
+            is_shoulder,
+            is_vpp_arr,
+            1,  # mode ToU
+            bat_cap,
+            init_soc,
+            soc_min,
+            soc_max,
+            max_chg,
+            max_dis,
+            bat_eff
+        )
+
+        df_res['battery_power_ac_kw'] = bat_power
+        df_res['battery_soc_pct']     = soc_pct
+        df_res['battery_soc_kwh']     = (soc_pct / 100.0) * bat_cap
+        df_res['grid_net_kw']         = arr_load - solar_kw - bat_power
+        df_res['grid_import_kw']      = np.where(df_res['grid_net_kw'] > 0,  df_res['grid_net_kw'], 0)
+        df_res['grid_export_kw']      = np.where(df_res['grid_net_kw'] < 0, -df_res['grid_net_kw'], 0)
+
     # ── Finalisasi kolom output ───────────────────────────────────────
     final_cols = [
         'timestamp', 'irradiance', 'temperature', 'load_profile',
         'price_profile', 'spot_price_AUD/kWh',
-        'solar_output_kw', 'grid_net_kw', 'grid_import_kw', 'grid_export_kw',
+        'solar_output_kw', 'battery_soc_pct', 'battery_soc_kwh', 'battery_power_ac_kw',
+        'grid_net_kw', 'grid_import_kw', 'grid_export_kw',
         'tariff_import_flat_AUD/kWh', 'tariff_export_flat_AUD/kWh',
         'tariff_import_tou_AUD/kWh',  'tariff_export_tou_AUD/kWh',
     ]

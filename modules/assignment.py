@@ -88,6 +88,27 @@ OUTPUT_COLUMNS = {
     ],
 }
 
+# Kolom output CSV khusus Admin Full CSV
+OUTPUT_COLUMNS_ADMIN = {
+    ASSIGNMENT_1: OUTPUT_COLUMNS[ASSIGNMENT_1],
+    ASSIGNMENT_2: [
+        'timestamp',
+        'irradiance_W/m^2',
+        'temperature_C',
+        'solar_output_kW',
+        'load_kW',
+        'battery_soc_%',
+        'battery_soc_kwh',
+        'battery_power_ac_kW',
+        'grid_net_kW',
+        'spot_price_AUD/kWh',
+        'tariff_import_flat_AUD/kWh',
+        'tariff_export_flat_AUD/kWh',
+        'tariff_import_tou_AUD/kWh',
+        'tariff_export_tou_AUD/kWh',
+    ],
+}
+
 
 # =====================================================================
 # HELPERS
@@ -121,8 +142,11 @@ def get_vis_config(assignment_type: str) -> dict:
     """
     return VIS_CONFIG.get(assignment_type, VIS_CONFIG[ASSIGNMENT_1])
 
-def get_output_columns(assignment_type: str) -> list:
-    """Kembalikan list kolom output CSV untuk assignment tertentu."""
+def get_output_columns(assignment_type: str, is_admin_full: bool = False, *args, **kwargs) -> list:
+    """Kembalikan list kolom output CSV untuk assignment tertentu (bisa versi full admin)."""
+    is_admin = is_admin_full or kwargs.get('is_admin_full', False)
+    if is_admin:
+        return OUTPUT_COLUMNS_ADMIN.get(assignment_type, OUTPUT_COLUMNS.get(assignment_type, OUTPUT_COLUMNS[ASSIGNMENT_1]))
     return OUTPUT_COLUMNS.get(assignment_type, OUTPUT_COLUMNS[ASSIGNMENT_1])
 
 def show_battery(assignment_type: str) -> bool:

@@ -685,6 +685,25 @@ if st.session_state['role'] == 'admin':
                                         'soc_max_pct': saved_params.get('soc_max', 0.9),
                                         'dispatch_price_threshold': saved_params.get('vpp_thresh', 800),
                                     })
+                                elif regen_asgn_type == 'assignment_2':
+                                    r_solar = saved_params.get('solar', 5.0)
+                                    r_load_mult = saved_params.get('load_multiplier', 15.0)
+                                    r_bat_cap = saved_params.get('bat')
+                                    if r_bat_cap is None:
+                                        r_bat_cap = round(((1.5 * r_solar) + (0.3 * r_load_mult)) * 2) / 2
+                                    r_bat_power = saved_params.get('bat_charge_kw')
+                                    if r_bat_power is None:
+                                        r_bat_power = min(r_solar, round((0.5 * r_bat_cap) * 2) / 2)
+                                    sim_params.update({
+                                        'battery_capacity_kwh': r_bat_cap,
+                                        'battery_efficiency': 0.95,
+                                        'battery_initial_soc': 0.5,
+                                        'max_charge_kw': r_bat_power,
+                                        'max_discharge_kw': r_bat_power,
+                                        'soc_min_pct': 0.1,
+                                        'soc_max_pct': 0.9,
+                                        'dispatch_price_threshold': 800,
+                                    })
                                 
                                 t_data = saved_params['tariff_data']
                                 regen_scheme = t_data.get('tariff_scheme', 'Flat')
@@ -725,11 +744,15 @@ if st.session_state['role'] == 'admin':
                                 # Rename map kondisional per assignment
                                 if regen_asgn_type == asgn.ASSIGNMENT_2:
                                     df_export = df_result_regen.rename(columns={
-                                        'irradiance':   'irradiance_W/m^2',
-                                        'temperature':  'temperature_C',
-                                        'load_profile': 'load_kW',
-                                        'price_profile':'price_AUD/MWh',
-                                        'solar_output_kw': 'solar_output_kW',
+                                        'irradiance':          'irradiance_W/m^2',
+                                        'temperature':         'temperature_C',
+                                        'load_profile':        'load_kW',
+                                        'price_profile':       'price_AUD/MWh',
+                                        'solar_output_kw':     'solar_output_kW',
+                                        'battery_soc_pct':     'battery_soc_%',
+                                        'battery_soc_kwh':     'battery_soc_kwh',
+                                        'battery_power_ac_kw': 'battery_power_ac_kW',
+                                        'grid_net_kw':         'grid_net_kW',
                                     })
                                 else:
                                     df_export = df_result_regen.round(2).rename(columns={
@@ -746,15 +769,16 @@ if st.session_state['role'] == 'admin':
                                         'grid_net_kw':         'grid_net_kW',
                                     })
 
-                                _out_cols = asgn.get_output_columns(regen_asgn_type)
-                                df_export  = df_export[[c for c in _out_cols if c in df_export.columns]]
+                                _out_cols_full = asgn.get_output_columns(regen_asgn_type, is_admin_full=True)
+                                df_export_full = df_export[[c for c in _out_cols_full if c in df_export.columns]]
 
                                 # Full CSV
-                                st.session_state['regen_csv_data'] = df_export.to_csv(index=False).encode('utf-8')
+                                st.session_state['regen_csv_data'] = df_export_full.to_csv(index=False).encode('utf-8')
 
                                 # Partial CSV untuk Asgn 2
                                 if regen_asgn_type == asgn.ASSIGNMENT_2:
-                                    _df_regen_partial = df_export.copy()
+                                    _out_cols_student = asgn.get_output_columns(regen_asgn_type, is_admin_full=False)
+                                    _df_regen_partial = df_export[[c for c in _out_cols_student if c in df_export.columns]].copy()
                                     _ry_first = _df_regen_partial['timestamp'].dt.year.min()
                                     _ry_mask  = _df_regen_partial['timestamp'].dt.year > _ry_first
                                     _regen_blank = [
@@ -1081,6 +1105,21 @@ if btn_run:
                 'soc_max_pct': p_max_soc,
                 'dispatch_price_threshold': vpp_price,
             })
+        elif active_asgn_type == asgn.ASSIGNMENT_2:
+            auto_bat_cap = round(((1.5 * final_p_solar) + (0.3 * final_load_mult)) * 2) / 2
+            auto_bat_power = min(final_p_solar, round((0.5 * auto_bat_cap) * 2) / 2)
+            final_p_bat = auto_bat_cap
+            auto_charge_power = auto_bat_power
+            params.update({
+                'battery_capacity_kwh': auto_bat_cap,
+                'battery_efficiency': 0.95,
+                'battery_initial_soc': 0.5,
+                'max_charge_kw': auto_bat_power,
+                'max_discharge_kw': auto_bat_power,
+                'soc_min_pct': 0.1,
+                'soc_max_pct': 0.9,
+                'dispatch_price_threshold': 800,
+            })
         
         with st.spinner("Calculating Energy Flow..."):
             df_result = calculator.run_simulation(df_input, params, active_asgn_type)
@@ -1090,17 +1129,20 @@ if btn_run:
         st.session_state['info_simulasi'] = f"{selected_loc}_{selected_point}_{final_start_y}-{final_end_y}"
 
         # ── Buat CSV bytes sekali saat generate ──────────────────────────────
-        # Disimpan ke session_state agar tidak di-rebuild tiap interaksi widget.
         _asgn_for_csv = active_asgn_type
 
         if _asgn_for_csv == asgn.ASSIGNMENT_2:
-            # Asgn 2: price_profile → price_AUD/MWh; spot_price_AUD/kWh sudah dari calculator
+            # Asgn 2: price_profile → price_AUD/MWh; spot_price_AUD/kWh & battery cols dari calculator
             _df_csv = df_result.copy().rename(columns={
-                'irradiance':      'irradiance_W/m^2',
-                'temperature':     'temperature_C',
-                'load_profile':    'load_kW',
-                'price_profile':   'price_AUD/MWh',
-                'solar_output_kw': 'solar_output_kW',
+                'irradiance':          'irradiance_W/m^2',
+                'temperature':         'temperature_C',
+                'load_profile':        'load_kW',
+                'price_profile':       'price_AUD/MWh',
+                'solar_output_kw':     'solar_output_kW',
+                'battery_soc_pct':     'battery_soc_%',
+                'battery_soc_kwh':     'battery_soc_kwh',
+                'battery_power_ac_kw': 'battery_power_ac_kW',
+                'grid_net_kw':         'grid_net_kW',
             })
         else:
             # Asgn 1: rename map lama (termasuk tariff_import/export_AUD)
@@ -1111,6 +1153,7 @@ if btn_run:
                 'price_profile':       'price_AUD/MWh',
                 'solar_output_kw':     'solar_output_kW',
                 'battery_soc_pct':     'battery_soc_%',
+                'battery_soc_kwh':     'battery_soc_kwh',
                 'battery_power_ac_kw': 'battery_power_ac_kW',
                 'tariff_import_AUD':   'tariff_import_AUD/kWh',
                 'tariff_export_AUD':   'tariff_export_AUD/kWh',
@@ -1120,15 +1163,16 @@ if btn_run:
                 if _c in _df_csv.columns:
                     _df_csv[_c] = _df_csv[_c].round(5)
 
-        _desired = asgn.get_output_columns(_asgn_for_csv)
-        _df_csv  = _df_csv[[c for c in _desired if c in _df_csv.columns]]
+        _desired_full = asgn.get_output_columns(_asgn_for_csv, is_admin_full=True)
+        _df_full_csv  = _df_csv[[c for c in _desired_full if c in _df_csv.columns]]
 
-        # Full CSV (semua data lengkap)
-        st.session_state['gen_csv_data'] = _df_csv.to_csv(index=False).encode('utf-8')
+        # Full CSV (semua data lengkap termasuk kolom baterai untuk Admin)
+        st.session_state['gen_csv_data'] = _df_full_csv.to_csv(index=False).encode('utf-8')
 
         # Partial CSV (hanya untuk Asgn 2): tahun ke-2+ dikosongkan di kolom forecast
         if _asgn_for_csv == asgn.ASSIGNMENT_2:
-            _df_partial = _df_csv.copy()
+            _desired_student = asgn.get_output_columns(_asgn_for_csv, is_admin_full=False)
+            _df_partial = _df_csv[[c for c in _desired_student if c in _df_csv.columns]].copy()
             _first_year = _df_partial['timestamp'].dt.year.min()
             _mask_later = _df_partial['timestamp'].dt.year > _first_year
             _blank_cols = [
