@@ -15,6 +15,7 @@ from modules import config as cfg
 from modules import student_log as s_log
 from modules import assignment as asgn
 from modules import ui_helpers as ui_h
+from modules import data_noise as d_noise
 from st_aggrid import AgGrid, GridOptionsBuilder
 
 st.set_page_config(page_title="CER Simulation Data Generator", layout="wide")
@@ -779,17 +780,8 @@ if st.session_state['role'] == 'admin':
                                 if regen_asgn_type == asgn.ASSIGNMENT_2:
                                     _out_cols_student = asgn.get_output_columns(regen_asgn_type, is_admin_full=False)
                                     _df_regen_partial = df_export[[c for c in _out_cols_student if c in df_export.columns]].copy()
-                                    _ry_first = _df_regen_partial['timestamp'].dt.year.min()
-                                    _ry_mask  = _df_regen_partial['timestamp'].dt.year > _ry_first
-                                    _regen_blank = [
-                                        'solar_output_kW',
-                                        'spot_price_AUD/kWh',
-                                        'tariff_import_flat_AUD/kWh', 'tariff_export_flat_AUD/kWh',
-                                        'tariff_import_tou_AUD/kWh',  'tariff_export_tou_AUD/kWh',
-                                    ]
-                                    for _rc in _regen_blank:
-                                        if _rc in _df_regen_partial.columns:
-                                            _df_regen_partial.loc[_ry_mask, _rc] = np.nan
+                                    _df_regen_partial = d_noise.apply_assignment2_missing_values(_df_regen_partial, nim_target)
+                                    _df_regen_partial = _df_regen_partial[[c for c in _out_cols_student if c in _df_regen_partial.columns]]
                                     st.session_state['regen_csv_data_partial'] = _df_regen_partial.to_csv(index=False).encode('utf-8')
                                     del _df_regen_partial
                                 else:
@@ -1173,17 +1165,9 @@ if btn_run:
         if _asgn_for_csv == asgn.ASSIGNMENT_2:
             _desired_student = asgn.get_output_columns(_asgn_for_csv, is_admin_full=False)
             _df_partial = _df_csv[[c for c in _desired_student if c in _df_csv.columns]].copy()
-            _first_year = _df_partial['timestamp'].dt.year.min()
-            _mask_later = _df_partial['timestamp'].dt.year > _first_year
-            _blank_cols = [
-                'solar_output_kW',
-                'spot_price_AUD/kWh',
-                'tariff_import_flat_AUD/kWh', 'tariff_export_flat_AUD/kWh',
-                'tariff_import_tou_AUD/kWh',  'tariff_export_tou_AUD/kWh',
-            ]
-            for _col in _blank_cols:
-                if _col in _df_partial.columns:
-                    _df_partial.loc[_mask_later, _col] = np.nan
+            _nim_for_noise = student_nim if st.session_state.get('role') == 'student' else 'student'
+            _df_partial = d_noise.apply_assignment2_missing_values(_df_partial, _nim_for_noise)
+            _df_partial = _df_partial[[c for c in _desired_student if c in _df_partial.columns]]
             st.session_state['gen_csv_data_partial'] = _df_partial.to_csv(index=False).encode('utf-8')
             del _df_partial
         else:

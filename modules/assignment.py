@@ -79,6 +79,7 @@ OUTPUT_COLUMNS = {
         'irradiance_W/m^2',
         'temperature_C',
         'solar_output_kW',
+        'commercial_forecasted_solar_output_kW',
         'load_kW',
         'spot_price_AUD/kWh',
         'tariff_import_flat_AUD/kWh',
