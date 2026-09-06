@@ -152,6 +152,9 @@ if st.session_state['role'] == 'admin':
                     success = cfg.save_config_to_sheets(new_config_name, st.session_state)
                     if success:
                         st.session_state['active_config'] = new_config_name
+                        latest_row = cfg.get_latest_config_for_assignment(selected_asgn_key)
+                        if latest_row is not None:
+                            cfg.apply_row_to_session(latest_row)
                         st.success("✅ Successfully Saved Config!")
                         tm.sleep(1)
                         st.rerun()
@@ -740,6 +743,7 @@ if st.session_state['role'] == 'admin':
                                     sim_params['import_flat']  = t_data.get('import_flat', 0.20)
                                     sim_params['export_price'] = t_data.get('export_price', 0.08)
 
+                                sim_params['student_nim'] = nim_target
                                 df_result_regen = calculator.run_simulation(df_input_regen, sim_params, regen_asgn_type)
 
                                 # Rename map kondisional per assignment
@@ -750,6 +754,7 @@ if st.session_state['role'] == 'admin':
                                         'load_profile':        'load_kW',
                                         'price_profile':       'price_AUD/MWh',
                                         'solar_output_kw':     'solar_output_kW',
+                                        'solar_output_pure_kw':'solar_output_pure_kW',
                                         'battery_soc_pct':     'battery_soc_%',
                                         'battery_soc_kwh':     'battery_soc_kwh',
                                         'battery_power_ac_kw': 'battery_power_ac_kW',
@@ -779,7 +784,8 @@ if st.session_state['role'] == 'admin':
                                 # Partial CSV untuk Asgn 2
                                 if regen_asgn_type == asgn.ASSIGNMENT_2:
                                     _out_cols_student = asgn.get_output_columns(regen_asgn_type, is_admin_full=False)
-                                    _df_regen_partial = df_export[[c for c in _out_cols_student if c in df_export.columns]].copy()
+                                    _cols_to_pass = list(_out_cols_student) + ['solar_output_pure_kW'] if 'solar_output_pure_kW' in df_export.columns else list(_out_cols_student)
+                                    _df_regen_partial = df_export[[c for c in _cols_to_pass if c in df_export.columns]].copy()
                                     _df_regen_partial = d_noise.apply_assignment2_missing_values(_df_regen_partial, nim_target)
                                     _df_regen_partial = _df_regen_partial[[c for c in _out_cols_student if c in _df_regen_partial.columns]]
                                     st.session_state['regen_csv_data_partial'] = _df_regen_partial.to_csv(index=False).encode('utf-8')
@@ -1113,6 +1119,8 @@ if btn_run:
                 'dispatch_price_threshold': 800,
             })
         
+        params['student_nim'] = student_nim if st.session_state.get('role') == 'student' else 'student'
+        
         with st.spinner("Calculating Energy Flow..."):
             df_result = calculator.run_simulation(df_input, params, active_asgn_type)
 
@@ -1131,6 +1139,7 @@ if btn_run:
                 'load_profile':        'load_kW',
                 'price_profile':       'price_AUD/MWh',
                 'solar_output_kw':     'solar_output_kW',
+                'solar_output_pure_kw':'solar_output_pure_kW',
                 'battery_soc_pct':     'battery_soc_%',
                 'battery_soc_kwh':     'battery_soc_kwh',
                 'battery_power_ac_kw': 'battery_power_ac_kW',
@@ -1164,7 +1173,8 @@ if btn_run:
         # Partial CSV (hanya untuk Asgn 2): tahun ke-2+ dikosongkan di kolom forecast
         if _asgn_for_csv == asgn.ASSIGNMENT_2:
             _desired_student = asgn.get_output_columns(_asgn_for_csv, is_admin_full=False)
-            _df_partial = _df_csv[[c for c in _desired_student if c in _df_csv.columns]].copy()
+            _cols_to_pass = list(_desired_student) + ['solar_output_pure_kW'] if 'solar_output_pure_kW' in _df_csv.columns else list(_desired_student)
+            _df_partial = _df_csv[[c for c in _cols_to_pass if c in _df_csv.columns]].copy()
             _nim_for_noise = student_nim if st.session_state.get('role') == 'student' else 'student'
             _df_partial = d_noise.apply_assignment2_missing_values(_df_partial, _nim_for_noise)
             _df_partial = _df_partial[[c for c in _desired_student if c in _df_partial.columns]]

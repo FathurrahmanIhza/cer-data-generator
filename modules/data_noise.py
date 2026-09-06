@@ -18,6 +18,50 @@ import numpy as np
 import pandas as pd
 
 
+def add_realistic_pv_noise(pv_pure: np.ndarray, irradiance: np.ndarray, noise_level: float = 0.08, cloud_prob: float = 0.05, seed: int = None) -> np.ndarray:
+    """
+    Menambahkan Multiplicative Gaussian noise dan cloud transient drop-out pada PV Output.
+    
+    Parameters
+    ----------
+    pv_pure : np.ndarray
+        Array solar output murni dari rumus deterministik.
+    irradiance : np.ndarray
+        Array irradiance (W/m^2).
+    noise_level : float
+        Level Gaussian noise (default 0.08 = 8%).
+    cloud_prob : float
+        Probabilitas drop-out awan saat siang hari (default 0.05 = 5%).
+    seed : int, optional
+        Random seed untuk reproduksibilitas.
+        
+    Returns
+    -------
+    np.ndarray
+        Array solar output yang sudah ditambah noise realistis.
+    """
+    if seed is not None:
+        rng = np.random.RandomState(int(seed) % (2**32))
+    else:
+        rng = np.random.RandomState(42)
+
+    # 1. Multiplicative Gaussian Noise (cth: variasi 8%)
+    gaussian_noise = rng.normal(1.0, noise_level, size=len(pv_pure))
+    pv_noisy = pv_pure * gaussian_noise
+
+    # 2. Cloud Intermittency (Drop-out acak saat ada iradiasi matahari > 50 W/m^2)
+    is_daytime = irradiance > 50
+    cloud_drops = rng.binomial(1, cloud_prob, size=len(pv_pure))
+    drop_severity = rng.uniform(0.4, 0.7, size=len(pv_pure))  # Drop 40% - 70%
+
+    # Aplikasikan drop awan hanya di siang hari
+    cloud_impact = 1.0 - (cloud_drops * drop_severity * is_daytime)
+    pv_final = pv_noisy * cloud_impact
+
+    # Pastikan tidak ada nilai di bawah 0
+    return np.maximum(pv_final, 0.0)
+
+
 def apply_assignment2_missing_values(df: pd.DataFrame, student_nim: str) -> pd.DataFrame:
     """
     Menginjeksi missing values pada DataFrame Partial CSV Assignment 2.
@@ -144,8 +188,15 @@ def apply_assignment2_missing_values(df: pd.DataFrame, student_nim: str) -> pd.D
     mask_year_1 = (df_out['timestamp'].dt.year == first_year)
     mask_year_2_plus = (df_out['timestamp'].dt.year > first_year)
 
-    # Simpan data solar_output asli untuk commercial_forecasted_solar_output_kW sebelum di-NaN
-    raw_solar_output = df_out['solar_output_kW'].copy() if 'solar_output_kW' in df_out.columns else None
+    # Simpan data solar_output murni (tanpa noise) untuk commercial_forecasted_solar_output_kW sebelum di-NaN
+    if 'solar_output_pure_kW' in df_out.columns:
+        raw_solar_output = df_out['solar_output_pure_kW'].copy()
+    elif 'solar_output_pure_kw' in df_out.columns:
+        raw_solar_output = df_out['solar_output_pure_kw'].copy()
+    elif 'solar_output_kW' in df_out.columns:
+        raw_solar_output = df_out['solar_output_kW'].copy()
+    else:
+        raw_solar_output = None
 
     # Terapkan NaN pada baris gap yang berhasil ditaruh
     for start_idx, end_idx in placed_gaps:
@@ -163,12 +214,10 @@ def apply_assignment2_missing_values(df: pd.DataFrame, student_nim: str) -> pd.D
                 if col in df_out.columns:
                     df_out.loc[y2_slice, col] = np.nan
 
-    # Kosongkan solar_output_kW & spot_price / tarif di Tahun 2+ untuk Partial CSV (tugas mahasiswa)
+    # Kosongkan solar_output_kW & spot_price di Tahun 2+ untuk Partial CSV (tugas mahasiswa)
     blank_cols_y2 = [
         'solar_output_kW',
         'spot_price_AUD/kWh',
-        'tariff_import_flat_AUD/kWh', 'tariff_export_flat_AUD/kWh',
-        'tariff_import_tou_AUD/kWh',  'tariff_export_tou_AUD/kWh',
     ]
     for col in blank_cols_y2:
         if col in df_out.columns:

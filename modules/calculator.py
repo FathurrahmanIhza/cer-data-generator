@@ -476,17 +476,31 @@ def run_simulation_solar_only(df, params):
     arr_load = df['load_profile'].to_numpy(dtype=np.float64)
 
     temp_factor = 1 + (params['temp_coeff'] * arr_temp)
-    solar_kw = params['solar_capacity_kw'] * (arr_irr / 1000.0) * temp_factor * params['pr']
-    solar_kw = np.maximum(solar_kw, 0.0)
+    solar_kw_pure = params['solar_capacity_kw'] * (arr_irr / 1000.0) * temp_factor * params['pr']
+    solar_kw_pure = np.maximum(solar_kw_pure, 0.0)
+
+    # Injeksi noise realistis (Gaussian Noise 8% + Cloud Intermittency 5%)
+    import hashlib
+    from modules import data_noise as d_noise
+    student_nim = params.get('student_nim', 'student')
+    clean_nim = str(student_nim).strip().lower() if student_nim else "student"
+    seed_hash = hashlib.md5(clean_nim.encode('utf-8')).hexdigest()
+    seed_val = int(seed_hash[:8], 16) % (2**32)
+
+    solar_kw_noisy = d_noise.add_realistic_pv_noise(
+        solar_kw_pure, arr_irr, noise_level=0.08, cloud_prob=0.05, seed=seed_val
+    )
+    solar_kw = solar_kw_noisy
 
     df_res = df.copy()
     if 'price_import' in df_res.columns:
         df_res.rename(columns={'price_import': 'price_profile'}, inplace=True)
 
-    df_res['solar_output_kw'] = solar_kw
-    df_res['grid_net_kw']     = arr_load - solar_kw
-    df_res['grid_import_kw']  = np.where(df_res['grid_net_kw'] > 0,  df_res['grid_net_kw'], 0)
-    df_res['grid_export_kw']  = np.where(df_res['grid_net_kw'] < 0, -df_res['grid_net_kw'], 0)
+    df_res['solar_output_kw']      = solar_kw_noisy
+    df_res['solar_output_pure_kw'] = solar_kw_pure
+    df_res['grid_net_kw']          = arr_load - solar_kw
+    df_res['grid_import_kw']       = np.where(df_res['grid_net_kw'] > 0,  df_res['grid_net_kw'], 0)
+    df_res['grid_export_kw']       = np.where(df_res['grid_net_kw'] < 0, -df_res['grid_net_kw'], 0)
 
     # ── Spot price AUD/kWh (konversi dari AUD/MWh) ───────────────────
     df_res['spot_price_AUD/kWh'] = df_res['price_profile'] / 1000.0
@@ -577,7 +591,7 @@ def run_simulation_solar_only(df, params):
     final_cols = [
         'timestamp', 'irradiance', 'temperature', 'load_profile',
         'price_profile', 'spot_price_AUD/kWh',
-        'solar_output_kw', 'battery_soc_pct', 'battery_soc_kwh', 'battery_power_ac_kw',
+        'solar_output_kw', 'solar_output_pure_kw', 'battery_soc_pct', 'battery_soc_kwh', 'battery_power_ac_kw',
         'grid_net_kw', 'grid_import_kw', 'grid_export_kw',
         'tariff_import_flat_AUD/kWh', 'tariff_export_flat_AUD/kWh',
         'tariff_import_tou_AUD/kWh',  'tariff_export_tou_AUD/kWh',

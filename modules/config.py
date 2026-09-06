@@ -112,15 +112,15 @@ def save_config_to_sheets(config_name, current_state):
             "Config_Name": config_name,
             "assignment_type": current_state.get("active_assignment", "assignment_1"),
             "use_rand_duration": current_state.get("chk_dur", False),
-            "rand_dur_years": current_state.get("rand_dur_years", 1),
-            "start_year": current_state.get("date_start", 2020),
-            "end_year": current_state.get("date_end", 2020),
+            "rand_dur_years": current_state.get("ui_rand_dur_years", current_state.get("rand_dur_years", 1)),
+            "start_year": current_state.get("ui_date_start", current_state.get("date_start", 2020)),
+            "end_year": current_state.get("ui_date_end", current_state.get("date_end", 2020)),
             "use_rand_location": current_state.get("chk_loc", True),
-            "region_fix": current_state.get("loc_region", ""),
-            "point_fix": current_state.get("loc_point", ""),
+            "region_fix": current_state.get("ui_loc_region", current_state.get("loc_region", "")),
+            "point_fix": current_state.get("ui_loc_point", current_state.get("loc_point", "")),
             "use_rand_load_profile": current_state.get("chk_load", False),
-            "load_profile_fix": current_state.get("sel_load_file", ""),
-            "load_mult": current_state.get("load_mult", 15.0),
+            "load_profile_fix": current_state.get("ui_sel_load_file", current_state.get("sel_load_file", "")),
+            "load_mult": current_state.get("ui_load_mult", current_state.get("load_mult", 15.0)),
             "use_rand_solar": current_state.get("chk_solar", False),
             "solar_min": current_state.get("sol_min", 4.0),
             "solar_max": current_state.get("sol_max", 6.0),
@@ -136,21 +136,21 @@ def save_config_to_sheets(config_name, current_state):
             "soc_min": current_state.get("bat_soc_range", (10, 90))[0] / 100,
             "soc_max": current_state.get("bat_soc_range", (10, 90))[1] / 100,
             "vpp_thresh": current_state.get("vpp_threshold", 800),
-            "t_peak_start": time_encoder(current_state.get("t_p_start", time(17,0))),
-            "t_peak_end": time_encoder(current_state.get("t_p_end", time(20,0))),
-            "t_offpeak_start": time_encoder(current_state.get("t_o_start", time(22,0))),
-            "t_offpeak_end": time_encoder(current_state.get("t_o_end", time(6,0))),
-            "t_shoulder_start": time_encoder(current_state.get("t_s_start", time(14,0))),
-            "t_shoulder_end": time_encoder(current_state.get("t_s_end", time(17,0))),
-            "tariff_scheme": current_state.get("tariff_scheme", "Flat"),
-            "exp_tariff": current_state.get("exp_tariff", 0.08),
-            "imp_tariff": current_state.get("imp_tariff", 0.20),
-            "p_peak": current_state.get("pp", 0.45),
-            "p_offpeak": current_state.get("po", 0.15),
-            "p_shoulder": current_state.get("ps", 0.25),
-            "e_peak": current_state.get("e_peak", 0.15),
-            "e_offpeak": current_state.get("e_offpeak", 0.05),
-            "e_shoulder": current_state.get("e_shoulder", 0.10)
+            "t_peak_start": time_encoder(current_state.get("ui_t_p_start", current_state.get("t_p_start", time(17,0)))),
+            "t_peak_end": time_encoder(current_state.get("ui_t_p_end", current_state.get("t_p_end", time(20,0)))),
+            "t_offpeak_start": time_encoder(current_state.get("ui_t_o_start", current_state.get("t_o_start", time(22,0)))),
+            "t_offpeak_end": time_encoder(current_state.get("ui_t_o_end", current_state.get("t_o_end", time(6,0)))),
+            "t_shoulder_start": time_encoder(current_state.get("ui_t_s_start", current_state.get("t_s_start", time(14,0)))),
+            "t_shoulder_end": time_encoder(current_state.get("ui_t_s_end", current_state.get("t_s_end", time(17,0)))),
+            "tariff_scheme": current_state.get("ui_tariff_scheme", current_state.get("tariff_scheme", "Flat")),
+            "exp_tariff": current_state.get("ui_exp_tariff", current_state.get("exp_tariff", 0.08)),
+            "imp_tariff": current_state.get("ui_imp_tariff", current_state.get("imp_tariff", 0.20)),
+            "p_peak": current_state.get("ui_pp", current_state.get("pp", 0.45)),
+            "p_offpeak": current_state.get("ui_po", current_state.get("po", 0.15)),
+            "p_shoulder": current_state.get("ui_ps", current_state.get("ps", 0.25)),
+            "e_peak": current_state.get("ui_e_peak", current_state.get("e_peak", 0.15)),
+            "e_offpeak": current_state.get("ui_e_offpeak", current_state.get("e_offpeak", 0.05)),
+            "e_shoulder": current_state.get("ui_e_shoulder", current_state.get("e_shoulder", 0.10))
         }
         
         # Eksekusi Insert (Sangat Cepat & Ramping!)
@@ -180,33 +180,56 @@ def apply_row_to_session(selected_row):
         "p_peak": "pp", "p_offpeak": "po", "p_shoulder": "ps",
         "e_peak": "e_peak", "e_offpeak": "e_offpeak", "e_shoulder": "e_shoulder"
     }
+
+    ui_key_map = {
+        "loc_region": "ui_loc_region",
+        "loc_point": "ui_loc_point",
+        "date_start": "ui_date_start",
+        "date_end": "ui_date_end",
+        "rand_dur_years": "ui_rand_dur_years",
+        "sel_load_file": "ui_sel_load_file",
+        "load_mult": "ui_load_mult",
+        "tariff_scheme": "ui_tariff_scheme",
+        "exp_tariff": "ui_exp_tariff",
+        "imp_tariff": "ui_imp_tariff",
+        "pp": "ui_pp",
+        "po": "ui_po",
+        "ps": "ui_ps",
+        "e_peak": "ui_e_peak",
+        "e_offpeak": "ui_e_offpeak",
+        "e_shoulder": "ui_e_shoulder",
+    }
+
     for db_col, widget_key in mapping.items():
         if db_col in selected_row:
             val = selected_row[db_col]
             if db_col.startswith("t_") and isinstance(val, str):
                 try:
                     h, m = map(int, val.split(':'))
-                    st.session_state[widget_key] = time(h, m)
+                    t_val = time(h, m)
+                    st.session_state[widget_key] = t_val
+                    st.session_state[f"ui_{widget_key}"] = t_val
                 except: pass
             elif widget_key.startswith("chk_"):
                 if pd.isna(val): 
                     st.session_state[widget_key] = False
                 else:
                     teks_val = str(val).strip().upper()
-                    if teks_val in ["TRUE", "1", "1.0"]:
-                        st.session_state[widget_key] = True
-                    else:
-                        st.session_state[widget_key] = False
+                    st.session_state[widget_key] = (teks_val in ["TRUE", "1", "1.0"])
             else:
                 if not pd.isna(val):
                     if db_col == "bat_init_soc":
-                        st.session_state[widget_key] = int(float(val) * 100)
+                        parsed_val = int(float(val) * 100)
                     elif widget_key in ["vpp_threshold", "bat_eff", "date_start", "date_end", "rand_dur_years"]:
-                        st.session_state[widget_key] = int(float(val))
+                        parsed_val = int(float(val))
                     elif widget_key in ["load_mult","sol_min", "sol_max", "sol_fix", "sol_temp", "sol_pr", "bat_min", "bat_max", "bat_fix", "exp_tariff", "imp_tariff", "pp", "po", "ps", "e_peak", "e_offpeak", "e_shoulder"]:
-                        st.session_state[widget_key] = float(val)
+                        parsed_val = float(val)
                     else:
-                        st.session_state[widget_key] = val
+                        parsed_val = val
+
+                    st.session_state[widget_key] = parsed_val
+                    if widget_key in ui_key_map:
+                        st.session_state[ui_key_map[widget_key]] = parsed_val
                 
     if "soc_min" in selected_row and "soc_max" in selected_row:
         val_min = selected_row["soc_min"]
@@ -215,6 +238,10 @@ def apply_row_to_session(selected_row):
             st.session_state["bat_soc_range"] = (int(float(val_min)*100), int(float(val_max)*100))
             
     if "start_year" in selected_row and not pd.isna(selected_row["start_year"]): 
-        st.session_state["date_start"] = int(float(selected_row["start_year"]))
+        y_start = int(float(selected_row["start_year"]))
+        st.session_state["date_start"] = y_start
+        st.session_state["ui_date_start"] = y_start
     if "end_year" in selected_row and not pd.isna(selected_row["end_year"]): 
-        st.session_state["date_end"] = int(float(selected_row["end_year"]))
+        y_end = int(float(selected_row["end_year"]))
+        st.session_state["date_end"] = y_end
+        st.session_state["ui_date_end"] = y_end
